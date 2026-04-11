@@ -1,0 +1,25 @@
+[package]
+name = "rlobkit-dialogs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rlobkit-core = { path = "../rlobkit-core" }
+async-trait = "0.1"
+thiserror = "2"
+bytes = "1"
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", target_arch = "wasm32"))'.dependencies]
+rfd = "0.15"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = "5"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22.4"
+jni-min-helper = "0.4"
+
+[features]
+default = []

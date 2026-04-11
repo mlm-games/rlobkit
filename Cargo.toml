@@ -1,6 +1,9 @@
-[package]
-name = "rlobkit"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["rlobkit-core", "rlobkit-dialogs", "rlobkit-image"]
+resolver = "2"
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["mlm"]
+license = "MIT"
