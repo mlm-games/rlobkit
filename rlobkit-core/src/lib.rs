@@ -129,6 +129,10 @@ impl PlatformFile {
     pub fn size(&self) -> Result<u64, RlobKitError> {
         match &self.inner {
             PlatformFileInner::Path(p) => Ok(std::fs::metadata(p)?.len()),
+            #[cfg(target_os = "android")]
+            PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
+                "Size is not available for Android URI".into(),
+            )),
         }
     }
 
@@ -136,6 +140,8 @@ impl PlatformFile {
     pub fn path(&self) -> Option<&Path> {
         match &self.inner {
             PlatformFileInner::Path(p) => Some(p),
+            #[cfg(target_os = "android")]
+            PlatformFileInner::Uri(_) => None,
         }
     }
 }

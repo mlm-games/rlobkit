@@ -1,0 +1,1 @@
+Inspired by filekit for KMP
