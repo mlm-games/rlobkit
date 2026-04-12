@@ -144,6 +144,14 @@ impl PlatformFile {
             PlatformFileInner::Uri(_) => None,
         }
     }
+
+    #[cfg(target_os = "android")]
+    pub fn uri(&self) -> Option<&str> {
+        match &self.inner {
+            PlatformFileInner::Uri(uri) => Some(uri.as_str()),
+            PlatformFileInner::Path(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

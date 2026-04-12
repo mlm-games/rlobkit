@@ -1324,6 +1324,7 @@ dependencies = [
  "dirs 5.0.1",
  "jni",
  "jni-min-helper",
+ "log",
  "rfd",
  "rlobkit-core",
  "thiserror 2.0.18",

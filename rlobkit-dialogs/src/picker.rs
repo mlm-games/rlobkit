@@ -1,6 +1,6 @@
 use crate::{RlobKitMode, RlobKitType};
 use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default)]
 pub struct OpenFileOptions {
@@ -111,6 +111,31 @@ impl RlobKit {
         #[cfg(target_os = "android")]
         {
             return crate::android::open_file_saver(opts).await;
+        }
+
+        #[allow(unreachable_code)]
+        Err(RlobKitError::UnsupportedOperation(
+            "Unsupported platform".into(),
+        ))
+    }
+
+    pub fn write_file_from_path(
+        target: &PlatformFile,
+        source_path: &Path,
+    ) -> Result<(), RlobKitError> {
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        {
+            return crate::desktop::write_file_from_path(target, source_path);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            return crate::wasm::write_file_from_path(target, source_path);
+        }
+
+        #[cfg(target_os = "android")]
+        {
+            return crate::android::write_file_from_path(target, source_path);
         }
 
         #[allow(unreachable_code)]

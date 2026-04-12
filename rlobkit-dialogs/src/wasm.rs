@@ -1,8 +1,9 @@
-use crate::picker::{OpenFileOptions, SaveFileOptions};
 use crate::RlobKitMode;
+use crate::picker::{OpenFileOptions, SaveFileOptions};
 use bytes::Bytes;
 use rfd::AsyncFileDialog;
 use rlobkit_core::{PlatformFile, RlobKitError};
+use std::path::Path;
 
 pub async fn open_file_picker(
     opts: OpenFileOptions,
@@ -39,11 +40,7 @@ pub async fn open_file_picker(
                     let data = Bytes::from(handle.read().await);
                     files.push(PlatformFile::from_blob(name, data));
                 }
-                if files.is_empty() {
-                    None
-                } else {
-                    Some(files)
-                }
+                if files.is_empty() { None } else { Some(files) }
             }
             None => None,
         },
@@ -55,5 +52,14 @@ pub async fn open_file_picker(
 pub async fn open_file_saver(_opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
     Err(RlobKitError::UnsupportedOperation(
         "Save dialog on WASM requires web-sys download trigger".into(),
+    ))
+}
+
+pub fn write_file_from_path(
+    _target: &PlatformFile,
+    _source_path: &Path,
+) -> Result<(), RlobKitError> {
+    Err(RlobKitError::UnsupportedOperation(
+        "Filesystem copy is not supported on WASM".into(),
     ))
 }

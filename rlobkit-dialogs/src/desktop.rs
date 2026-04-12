@@ -1,7 +1,9 @@
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
-use crate::{types::RlobKitType, RlobKitMode};
+use crate::{RlobKitMode, types::RlobKitType};
 use rfd::AsyncFileDialog;
 use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
+use std::io;
+use std::path::Path;
 
 pub async fn open_file_picker(
     opts: OpenFileOptions,
@@ -95,4 +97,30 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         .save_file()
         .await
         .map(|f| PlatformFile::from_path(f.path().to_path_buf())))
+}
+
+pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result<(), RlobKitError> {
+    let dest_path = target.path().ok_or_else(|| {
+        RlobKitError::UnsupportedOperation("Desktop target is not a filesystem path".into())
+    })?;
+
+    let source = std::fs::canonicalize(source_path).unwrap_or_else(|_| source_path.to_path_buf());
+    let destination = dest_path.to_path_buf();
+
+    if source == destination {
+        return Ok(());
+    }
+
+    std::fs::copy(&source, &destination)
+        .map(|_| ())
+        .map_err(|e| {
+            RlobKitError::Io(io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to copy '{}' to '{}': {e}",
+                    source.display(),
+                    destination.display()
+                ),
+            ))
+        })
 }

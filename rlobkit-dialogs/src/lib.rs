@@ -14,8 +14,12 @@ mod wasm;
 mod android;
 
 #[cfg(target_os = "android")]
-pub use android::{on_activity_result, on_activity_result_from_intent};
+pub use android::{
+    helper_activity_available_for_host, on_activity_result, on_activity_result_from_intent,
+    take_writable_fd_for_uri,
+};
 
 pub use mode::RlobKitMode;
-pub use picker::RlobKit;
+pub use picker::{OpenDirectoryOptions, OpenFileOptions, RlobKit, SaveFileOptions};
+pub use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
 pub use types::RlobKitType;

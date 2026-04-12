@@ -20,6 +20,14 @@ dirs = "5"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22.4"
 jni-min-helper = "0.4"
+log = "0.4"
+
+[package.metadata.android.cargo_rapk]
+java_sources = "android"
+
+[[package.metadata.android.cargo_rapk.activities]]
+name = "rust.rlobkit.RlobKitPickerActivity"
+exported = false
 
 [features]
 default = []
