@@ -143,4 +143,29 @@ impl RlobKit {
             "Unsupported platform".into(),
         ))
     }
+
+    pub fn read_file_to_path(
+        source: &PlatformFile,
+        dest_path: &Path,
+    ) -> Result<(), RlobKitError> {
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        {
+            return crate::desktop::read_file_to_path(source, dest_path);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            return crate::wasm::read_file_to_path(source, dest_path);
+        }
+
+        #[cfg(target_os = "android")]
+        {
+            return crate::android::read_file_to_path(source, dest_path);
+        }
+
+        #[allow(unreachable_code)]
+        Err(RlobKitError::UnsupportedOperation(
+            "Unsupported platform".into(),
+        ))
+    }
 }

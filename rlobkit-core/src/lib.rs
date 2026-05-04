@@ -104,8 +104,8 @@ impl PlatformFile {
             #[cfg(target_arch = "wasm32")]
             PlatformFileInner::Blob { data, .. } => Ok(data.clone()),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_uri) => Err(RlobKitError::UnsupportedOperation(
-                "Android URI reading requires async implementation".into(),
+            PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
+                "Android URI reading requires RlobKit::read_file_to_path (then read the local file)".into(),
             )),
         }
     }

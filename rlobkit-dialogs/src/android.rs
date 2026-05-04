@@ -742,6 +742,110 @@ fn launch_and_wait(
     wait_for_result(request_code)
 }
 
+pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), RlobKitError> {
+    let uri = source.uri().ok_or_else(|| {
+        RlobKitError::UnsupportedOperation("Android source is not a content URI".into())
+    })?;
+
+    let fd = with_android_env(|env| -> Result<i32, JniError> {
+        let context = current_context(env).map_err(|e| annotate_jni_error(env, "read.context", e))?;
+
+        let resolver = env
+            .call_method(
+                &context,
+                jni_str!("getContentResolver"),
+                jni_sig!("()Landroid/content/ContentResolver;"),
+                &[],
+            )
+            .map_err(|e| annotate_jni_error(env, "read.getContentResolver", e))?
+            .l()
+            .map_err(|e| annotate_jni_error(env, "read.getContentResolver.as_l", e))?;
+
+        let juri_class: jni::objects::JClass<'_> = env
+            .find_class(jni_str!("android/net/Uri"))
+            .map_err(|e| annotate_jni_error(env, "read.findClass(Uri)", e))?;
+        let juri_text = JString::new(env, uri)
+            .map_err(|e| annotate_jni_error(env, "read.newString(uri)", e))?;
+        let juri = env
+            .call_static_method(
+                juri_class,
+                jni_str!("parse"),
+                jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+                &[JValue::Object(&juri_text.into())],
+            )
+            .map_err(|e| annotate_jni_error(env, "read.Uri.parse", e))?
+            .l()
+            .map_err(|e| annotate_jni_error(env, "read.Uri.parse.as_l", e))?;
+
+        best_effort_grant_self_uri_permission(
+            env,
+            &context,
+            &juri,
+            FLAG_GRANT_READ_URI_PERMISSION,
+            uri,
+        );
+        best_effort_take_persistable_uri_permission(
+            env,
+            &resolver,
+            &juri,
+            FLAG_GRANT_READ_URI_PERMISSION,
+            uri,
+        );
+
+        let mode = JString::new(env, "r")
+            .map_err(|e| annotate_jni_error(env, "read.newString(mode)", e))?;
+        let mode_obj: JObject<'_> = mode.into();
+
+        let pfd = match env.call_method(
+            &resolver,
+            jni_str!("openFileDescriptor"),
+            jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;"),
+            &[JValue::Object(&juri), JValue::Object(&mode_obj)],
+        ) {
+            Ok(value) => value
+                .l()
+                .map_err(|e| annotate_jni_error(env, "read.openFileDescriptor.as_l", e))?,
+            Err(JniError::JavaException) => {
+                let _ = env.exception_catch();
+                return Err(JniError::MethodNotFound {
+                    name: "openFileDescriptor".into(),
+                    sig: "Java exception".into(),
+                });
+            }
+            Err(other) => return Err(annotate_jni_error(env, "read.openFileDescriptor", other)),
+        };
+
+        if pfd.is_null() {
+            return Err(JniError::MethodNotFound {
+                name: "openFileDescriptor".into(),
+                sig: "returned null".into(),
+            });
+        }
+
+        let fd = env
+            .call_method(&pfd, jni_str!("detachFd"), jni_sig!("()I"), &[])
+            .map_err(|e| annotate_jni_error(env, "read.detachFd", e))?
+            .i()
+            .map_err(|e| annotate_jni_error(env, "read.detachFd.as_i", e))?;
+
+        let _ = env.delete_local_ref(pfd);
+        Ok(fd)
+    })?;
+
+    if fd < 0 {
+        return Err(RlobKitError::UnsupportedOperation(format!(
+            "Failed to obtain readable file descriptor (fd={})",
+            fd
+        )));
+    }
+
+    let mut source_file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut dest_file = std::fs::File::create(dest_path)?;
+    std::io::copy(&mut source_file, &mut dest_file).map_err(RlobKitError::from)?;
+
+    Ok(())
+}
+
 pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result<(), RlobKitError> {
     let uri = target.uri().ok_or_else(|| {
         RlobKitError::UnsupportedOperation("Android target is not a content URI".into())

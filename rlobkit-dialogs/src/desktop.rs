@@ -124,3 +124,23 @@ pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result
             ))
         })
 }
+
+pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), RlobKitError> {
+    let src_path = source.path().ok_or_else(|| {
+        RlobKitError::UnsupportedOperation("Desktop source is not a filesystem path".into())
+    })?;
+
+    let source = std::fs::canonicalize(src_path).unwrap_or_else(|_| src_path.to_path_buf());
+    std::fs::copy(&source, dest_path)
+        .map(|_| ())
+        .map_err(|e| {
+            RlobKitError::Io(io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to copy '{}' to '{}': {e}",
+                    source.display(),
+                    dest_path.display()
+                ),
+            ))
+        })
+}

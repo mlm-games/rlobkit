@@ -63,3 +63,9 @@ pub fn write_file_from_path(
         "Filesystem copy is not supported on WASM".into(),
     ))
 }
+
+pub fn read_file_to_path(_source: &PlatformFile, _dest_path: &Path) -> Result<(), RlobKitError> {
+    Err(RlobKitError::UnsupportedOperation(
+        "Filesystem copy is not supported on WASM".into(),
+    ))
+}
