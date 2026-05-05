@@ -16,6 +16,8 @@ pub struct SaveFileOptions {
     pub extension: Option<String>,
     pub title: Option<String>,
     pub initial_directory: Option<PathBuf>,
+    #[cfg(target_arch = "wasm32")]
+    pub data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Default)]

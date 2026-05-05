@@ -49,10 +49,27 @@ pub async fn open_file_picker(
     Ok(files)
 }
 
-pub async fn open_file_saver(_opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
-    Err(RlobKitError::UnsupportedOperation(
-        "Save dialog on WASM requires web-sys download trigger".into(),
-    ))
+pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
+    let mut dialog = AsyncFileDialog::new();
+
+    if let Some(title) = &opts.title {
+        dialog = dialog.set_title(title);
+    }
+    if let Some(name) = &opts.suggested_name {
+        dialog = dialog.set_file_name(name);
+    }
+
+    let file = match dialog.save_file().await {
+        Some(f) => f,
+        None => return Ok(None),
+    };
+
+    if let Some(data) = opts.data {
+        let _ = file.write(&data).await;
+    }
+
+    let name = file.file_name();
+    Ok(Some(PlatformFile::from_blob(name, Bytes::new())))
 }
 
 pub fn write_file_from_path(

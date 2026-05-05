@@ -8,7 +8,7 @@ pub use error::RlobKitError;
 use bytes::Bytes;
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "tokio-runtime")]
+#[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
 use tokio::io::AsyncReadExt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +92,7 @@ impl PlatformFile {
         }
     }
 
-    #[cfg(feature = "tokio-runtime")]
+    #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
     pub async fn read_bytes_async(&self) -> Result<Bytes, RlobKitError> {
         match &self.inner {
             PlatformFileInner::Path(p) => {
@@ -119,6 +119,13 @@ impl PlatformFile {
                 "Use write_bytes_async on Android".into(),
             )),
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn write_bytes(&self, _data: &[u8]) -> Result<(), RlobKitError> {
+        Err(RlobKitError::UnsupportedOperation(
+            "Writing to blob not supported on WASM".into(),
+        ))
     }
 
     pub fn write_string(&self, s: &str) -> Result<(), RlobKitError> {
