@@ -1,5 +1,5 @@
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
-use crate::{RlobKitMode, types::RlobKitType};
+use crate::{types::RlobKitType, RlobKitMode};
 use rfd::AsyncFileDialog;
 use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
 use std::io;
@@ -86,11 +86,17 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
     if let Some(dir) = &opts.initial_directory {
         dialog = dialog.set_directory(dir);
     }
+    // Pass suggested name as-is - let file picker handle extensions
     if let Some(name) = &opts.suggested_name {
         dialog = dialog.set_file_name(name);
     }
-    if let Some(ext) = &opts.extension {
-        dialog = dialog.add_filter("File", &[ext.as_str()]);
+    // Add filters - rfd handles showing them appropriately per platform
+    if let Some(ft) = &opts.file_type {
+        let exts = ft.extensions();
+        for ext in &exts {
+            let name = ext.to_uppercase();
+            dialog = dialog.add_filter(&name, &[ext]);
+        }
     }
 
     Ok(dialog
@@ -131,16 +137,14 @@ pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), 
     })?;
 
     let source = std::fs::canonicalize(src_path).unwrap_or_else(|_| src_path.to_path_buf());
-    std::fs::copy(&source, dest_path)
-        .map(|_| ())
-        .map_err(|e| {
-            RlobKitError::Io(io::Error::new(
-                e.kind(),
-                format!(
-                    "Failed to copy '{}' to '{}': {e}",
-                    source.display(),
-                    dest_path.display()
-                ),
-            ))
-        })
+    std::fs::copy(&source, dest_path).map(|_| ()).map_err(|e| {
+        RlobKitError::Io(io::Error::new(
+            e.kind(),
+            format!(
+                "Failed to copy '{}' to '{}': {e}",
+                source.display(),
+                dest_path.display()
+            ),
+        ))
+    })
 }

@@ -1,11 +1,11 @@
-use crate::RlobKitMode;
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
+use crate::RlobKitMode;
 use jni::{
-    Env, EnvUnowned,
     errors::Error as JniError,
     jni_sig, jni_str,
     objects::{JByteArray, JObject, JObjectArray, JString, JValue},
     refs::Global,
+    Env, EnvUnowned,
 };
 use jni_min_helper::{android_context, jni_with_env};
 use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
@@ -300,19 +300,20 @@ fn put_mime_filters(
     Ok(())
 }
 
-fn mime_from_extension(extension: Option<&str>) -> &'static str {
-    match extension
-        .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("wav") => "audio/wav",
-        Some("flac") => "audio/flac",
-        Some("ogg") => "audio/ogg",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("aac") => "audio/aac",
-        Some("mid") | Some("midi") => "audio/midi",
-        _ => "application/octet-stream",
+/// Falls back to "application/octet-stream" if unknown.
+fn mime_from_extension(extension: Option<&str>) -> String {
+    match extension {
+        Some(ext) => {
+            let clean_ext = ext.trim_start_matches('.');
+            if clean_ext.is_empty() {
+                "application/octet-stream".to_string()
+            } else {
+                mime_guess::from_ext(clean_ext)
+                    .first_or_octet_stream()
+                    .to_string()
+            }
+        }
+        None => "application/octet-stream".to_string(),
     }
 }
 
@@ -748,7 +749,8 @@ pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), 
     })?;
 
     let fd = with_android_env(|env| -> Result<i32, JniError> {
-        let context = current_context(env).map_err(|e| annotate_jni_error(env, "read.context", e))?;
+        let context =
+            current_context(env).map_err(|e| annotate_jni_error(env, "read.context", e))?;
 
         let resolver = env
             .call_method(
