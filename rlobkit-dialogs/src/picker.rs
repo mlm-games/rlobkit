@@ -147,10 +147,7 @@ impl RlobKit {
         ))
     }
 
-    pub fn read_file_to_path(
-        source: &PlatformFile,
-        dest_path: &Path,
-    ) -> Result<(), RlobKitError> {
+    pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), RlobKitError> {
         #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             return crate::desktop::read_file_to_path(source, dest_path);
@@ -170,5 +167,20 @@ impl RlobKit {
         Err(RlobKitError::UnsupportedOperation(
             "Unsupported platform".into(),
         ))
+    }
+
+    pub async fn save_bytes(
+        opts: SaveFileOptions,
+        data: &[u8],
+    ) -> Result<Option<PlatformFile>, RlobKitError> {
+        let target = Self::open_file_saver(opts).await?;
+        if let Some(file) = &target {
+            let temp_name = file.name().unwrap_or_else(|| "export.bin".into());
+            let temp = std::env::temp_dir().join(temp_name);
+            std::fs::write(&temp, data)?;
+            Self::write_file_from_path(file, &temp)?;
+            let _ = std::fs::remove_file(&temp);
+        }
+        Ok(target)
     }
 }
