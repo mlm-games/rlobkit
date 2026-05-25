@@ -63,13 +63,7 @@ impl RlobKit {
             ..Default::default()
         })
         .await?;
-        Ok(result.and_then(|mut v| {
-            if v.is_empty() {
-                None
-            } else {
-                Some(v.remove(0))
-            }
-        }))
+        Ok(result.and_then(|v| v.into_iter().next()))
     }
 
     pub async fn open_directory_picker(
@@ -173,14 +167,38 @@ impl RlobKit {
         opts: SaveFileOptions,
         data: &[u8],
     ) -> Result<Option<PlatformFile>, RlobKitError> {
-        let target = Self::open_file_saver(opts).await?;
-        if let Some(file) = &target {
-            let temp_name = file.name().unwrap_or_else(|| "export.bin".into());
-            let temp = std::env::temp_dir().join(temp_name);
-            std::fs::write(&temp, data)?;
-            Self::write_file_from_path(file, &temp)?;
-            let _ = std::fs::remove_file(&temp);
+        #[cfg(target_os = "android")]
+        {
+            let target = Self::open_file_saver(opts).await?;
+            if let Some(file) = &target {
+                let temp_name = file.name().unwrap_or_else(|| "export.bin".into());
+                let temp = std::env::temp_dir().join(temp_name);
+                std::fs::write(&temp, data)?;
+                Self::write_file_from_path(file, &temp)?;
+                let _ = std::fs::remove_file(&temp);
+            }
+            return Ok(target);
         }
-        Ok(target)
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut wasm_opts = opts;
+            wasm_opts.data = Some(data.to_vec());
+            return Self::open_file_saver(wasm_opts).await;
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        {
+            let target = Self::open_file_saver(opts).await?;
+            if let Some(file) = &target {
+                file.write_bytes(data)?;
+            }
+            return Ok(target);
+        }
+
+        #[allow(unreachable_code)]
+        Err(RlobKitError::UnsupportedOperation(
+            "Unsupported platform".into(),
+        ))
     }
 }

@@ -101,11 +101,20 @@ impl PlatformFile {
                 file.read_to_end(&mut buffer).await?;
                 Ok(Bytes::from(buffer))
             }
-            #[cfg(target_arch = "wasm32")]
-            PlatformFileInner::Blob { data, .. } => Ok(data.clone()),
             #[cfg(target_os = "android")]
             PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
-                "Android URI reading requires RlobKit::read_file_to_path (then read the local file)".into(),
+                "Use read_file_to_path from rlobkit-dialogs to copy the URI to a local path first"
+                    .into(),
+            )),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn read_bytes_async(&self) -> Result<Bytes, RlobKitError> {
+        match &self.inner {
+            PlatformFileInner::Blob { data, .. } => Ok(data.clone()),
+            _ => Err(RlobKitError::UnsupportedOperation(
+                "Cannot read bytes from this file type on WASM".into(),
             )),
         }
     }
@@ -157,6 +166,14 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Uri(uri) => Some(uri.as_str()),
             PlatformFileInner::Path(_) => None,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn data(&self) -> Option<&Bytes> {
+        match &self.inner {
+            PlatformFileInner::Blob { data, .. } => Some(data),
+            _ => None,
         }
     }
 }
