@@ -20,8 +20,15 @@ pub use android::{
     take_writable_fd_for_uri,
 };
 
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", target_arch = "wasm32"))]
-pub use blocking::{blocking_open_file, blocking_pick_directory, blocking_pick_files, blocking_save_file};
+#[cfg(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "linux",
+    target_arch = "wasm32"
+))]
+pub use blocking::{
+    blocking_open_file, blocking_pick_directory, blocking_pick_files, blocking_save_file,
+};
 
 pub use mode::RlobKitMode;
 pub use picker::{OpenDirectoryOptions, OpenFileOptions, RlobKit, SaveFileOptions};

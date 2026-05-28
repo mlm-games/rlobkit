@@ -1,7 +1,7 @@
 //! rlobkit-image: Image compression and conversion utilities.
 
 use bytes::Bytes;
-use image::{imageops::FilterType, ImageFormat};
+use image::{ImageFormat, imageops::FilterType};
 use rlobkit_core::RlobKitError;
 use std::io::Cursor;
 

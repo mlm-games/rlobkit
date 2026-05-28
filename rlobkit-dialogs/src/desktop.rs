@@ -1,5 +1,5 @@
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
-use crate::{types::RlobKitType, RlobKitMode};
+use crate::{RlobKitMode, types::RlobKitType};
 use rfd::AsyncFileDialog;
 use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
 use std::io;

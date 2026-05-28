@@ -1,11 +1,11 @@
 #[cfg(not(target_os = "android"))]
-use crate::mode::RlobKitMode;
-#[cfg(not(target_os = "android"))]
-use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
-#[cfg(not(target_os = "android"))]
 use crate::RlobKit;
 #[cfg(not(target_os = "android"))]
 use crate::RlobKitType;
+#[cfg(not(target_os = "android"))]
+use crate::mode::RlobKitMode;
+#[cfg(not(target_os = "android"))]
+use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
 use std::path::PathBuf;
 
 #[cfg(not(target_os = "android"))]
@@ -28,7 +28,9 @@ pub fn blocking_open_file(title: &str, extensions: &[&str]) -> Option<PathBuf> {
         })
         .await;
         match result {
-            Ok(Some(mut files)) if !files.is_empty() => files.pop().and_then(|f| f.path().map(|p| p.to_path_buf())),
+            Ok(Some(mut files)) if !files.is_empty() => {
+                files.pop().and_then(|f| f.path().map(|p| p.to_path_buf()))
+            }
             _ => None,
         }
     })
@@ -37,7 +39,8 @@ pub fn blocking_open_file(title: &str, extensions: &[&str]) -> Option<PathBuf> {
 #[cfg(not(target_os = "android"))]
 pub fn blocking_save_file(title: &str, suggested_name: &str, extension: &str) -> Option<PathBuf> {
     block_on_runtime(async {
-        let exts: Vec<String> = extension.split(',')
+        let exts: Vec<String> = extension
+            .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
