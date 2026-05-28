@@ -1294,10 +1294,10 @@ dependencies = [
  "jni-min-helper",
  "log",
  "mime_guess",
+ "pollster",
  "rfd",
  "rlobkit-core",
  "thiserror",
- "tokio",
 ]
 
 [[package]]

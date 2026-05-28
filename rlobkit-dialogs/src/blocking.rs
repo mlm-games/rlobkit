@@ -10,13 +10,7 @@ use std::path::PathBuf;
 
 #[cfg(not(target_os = "android"))]
 fn block_on_runtime<T>(future: impl std::future::Future<Output = T>) -> T {
-    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-    let runtime = RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Failed to create async runtime")
-    });
-    runtime.block_on(future)
+    pollster::block_on(future)
 }
 
 #[cfg(not(target_os = "android"))]
