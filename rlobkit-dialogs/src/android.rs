@@ -103,39 +103,9 @@ fn map_jni_error(error: JniError) -> RlobKitError {
     RlobKitError::UnsupportedOperation(format!("Android JNI error: {error}"))
 }
 
-fn ensure_ndk_context_init() {
-    static INIT: OnceLock<()> = OnceLock::new();
-    INIT.get_or_init(|| {
-        // If the host already initialised, don't initialize_android_context.
-        if jni::JavaVM::singleton().is_ok() {
-            return;
-        }
-
-        unsafe extern "system" {
-            fn JNI_GetCreatedJavaVMs(
-                vmBuf: *mut *mut std::ffi::c_void,
-                bufLen: i32,
-                nVMs: *mut i32,
-            ) -> i32;
-        }
-
-        let mut vm_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-        let mut count: i32 = 0;
-        let result = unsafe { JNI_GetCreatedJavaVMs(&mut vm_ptr as *mut _, 1, &mut count) };
-
-        if result == 0 && count > 0 {
-            unsafe {
-                let _ = jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM);
-                ndk_context::initialize_android_context(vm_ptr, std::ptr::null_mut());
-            }
-        }
-    });
-}
-
 fn with_android_env<T>(
     f: impl FnOnce(&mut Env<'_>) -> Result<T, JniError>,
 ) -> Result<T, RlobKitError> {
-    ensure_ndk_context_init();
     jni_with_env(f).map_err(map_jni_error)
 }
 
