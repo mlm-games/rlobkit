@@ -765,8 +765,7 @@ fn resolve_mime_type(uri_str: &str) -> Option<String> {
             return Ok(None);
         }
 
-        let mime = JString::cast_local(env, mime_obj)?
-            .try_to_string(env)?;
+        let mime = JString::cast_local(env, mime_obj)?.try_to_string(env)?;
         Ok(Some(mime))
     })
     .ok()
@@ -997,8 +996,8 @@ fn open_readable_fd_for_uri(env: &mut Env<'_>, uri: &str) -> Result<i32, JniErro
     let juri_class: jni::objects::JClass<'_> = env
         .find_class(jni_str!("android/net/Uri"))
         .map_err(|e| annotate_jni_error(env, "read.findClass(Uri)", e))?;
-    let juri_text = JString::new(env, uri)
-        .map_err(|e| annotate_jni_error(env, "read.newString(uri)", e))?;
+    let juri_text =
+        JString::new(env, uri).map_err(|e| annotate_jni_error(env, "read.newString(uri)", e))?;
     let juri = env
         .call_static_method(
             juri_class,
@@ -1025,8 +1024,8 @@ fn open_readable_fd_for_uri(env: &mut Env<'_>, uri: &str) -> Result<i32, JniErro
         uri,
     );
 
-    let mode = JString::new(env, "r")
-        .map_err(|e| annotate_jni_error(env, "read.newString(mode)", e))?;
+    let mode =
+        JString::new(env, "r").map_err(|e| annotate_jni_error(env, "read.newString(mode)", e))?;
     let mode_obj: JObject<'_> = mode.into();
 
     let pfd = match env.call_method(
@@ -1114,10 +1113,7 @@ pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result
     })
 }
 
-fn open_output_stream_for_uri<'a>(
-    env: &mut Env<'a>,
-    uri: &str,
-) -> Result<JObject<'a>, JniError> {
+fn open_output_stream_for_uri<'a>(env: &mut Env<'a>, uri: &str) -> Result<JObject<'a>, JniError> {
     let context = current_context(env).map_err(|e| annotate_jni_error(env, "write.context", e))?;
     let resolver = env
         .call_method(
@@ -1133,8 +1129,8 @@ fn open_output_stream_for_uri<'a>(
     let juri_class: jni::objects::JClass<'_> = env
         .find_class(jni_str!("android/net/Uri"))
         .map_err(|e| annotate_jni_error(env, "write.findClass(Uri)", e))?;
-    let juri_text = JString::new(env, uri)
-        .map_err(|e| annotate_jni_error(env, "write.newString(uri)", e))?;
+    let juri_text =
+        JString::new(env, uri).map_err(|e| annotate_jni_error(env, "write.newString(uri)", e))?;
     let juri = env
         .call_static_method(
             juri_class,
@@ -1161,8 +1157,8 @@ fn open_output_stream_for_uri<'a>(
         uri,
     );
 
-    let mode = JString::new(env, "wt")
-        .map_err(|e| annotate_jni_error(env, "write.newString(mode)", e))?;
+    let mode =
+        JString::new(env, "wt").map_err(|e| annotate_jni_error(env, "write.newString(mode)", e))?;
     let mode_obj: JObject<'_> = mode.into();
 
     let out_stream = match env.call_method(
@@ -1184,9 +1180,7 @@ fn open_output_stream_for_uri<'a>(
             )
             .map_err(|e| annotate_jni_error(env, "write.openOutputStream(default)", e))?
             .l()
-            .map_err(|e| {
-                annotate_jni_error(env, "write.openOutputStream(default).as_l", e)
-            })?
+            .map_err(|e| annotate_jni_error(env, "write.openOutputStream(default).as_l", e))?
         }
         Err(other) => {
             return Err(annotate_jni_error(env, "write.openOutputStream(wt)", other));
@@ -1215,7 +1209,8 @@ fn write_bytes_to_output_stream(
         let jarr: JByteArray<'_> = env
             .new_byte_array(chunk_len)
             .map_err(|e| annotate_jni_error(env, "write.new_byte_array", e))?;
-        let tmp_i8: &[i8] = unsafe { std::slice::from_raw_parts(chunk.as_ptr() as *const i8, chunk_len) };
+        let tmp_i8: &[i8] =
+            unsafe { std::slice::from_raw_parts(chunk.as_ptr() as *const i8, chunk_len) };
         jarr.set_region(env, 0, tmp_i8)
             .map_err(|e| annotate_jni_error(env, "write.set_byte_array_region", e))?;
         let jarr_obj: JObject<'_> = jarr.into();
@@ -1309,8 +1304,8 @@ pub async fn open_file_picker(
                 err
             );
         }
-        let display_name = resolve_display_name(&uri)
-            .or_else(|| uri.rsplit('/').next().map(|s| s.to_string()));
+        let display_name =
+            resolve_display_name(&uri).or_else(|| uri.rsplit('/').next().map(|s| s.to_string()));
         let name = display_name.unwrap_or_else(|| "file".to_string());
         let size = resolve_size(&uri);
         let mime_type = resolve_mime_type(&uri);
@@ -1377,7 +1372,10 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
             grant_flags
         );
     }
-    let suggested = opts.suggested_name.clone().unwrap_or_else(|| "untitled".to_string());
+    let suggested = opts
+        .suggested_name
+        .clone()
+        .unwrap_or_else(|| "untitled".to_string());
     let name = uri
         .rsplit('/')
         .next()
@@ -1393,6 +1391,28 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
 /// on a URI-backed file). Safe to call more than once.
 pub fn init() {
     set_android_io(android_read_bytes, android_write_bytes);
+}
+
+/// Initialize the `ndk-context` static from the provided `JavaVM` and `Context`
+/// pointers (e.g. `app.vm_as_ptr()` and `app.activity_as_ptr()` from
+/// `android-activity`), then register rlobkit's Android I/O callbacks.
+/// Safe to call multiple times.
+///
+/// # Safety
+/// `vm` and `context` must be valid pointers provided by the Android runtime
+/// for the lifetime of the process.
+#[cfg(target_os = "android")]
+pub unsafe fn init_with_context(vm: *mut std::ffi::c_void, context: *mut std::ffi::c_void) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        unsafe { ndk_context::initialize_android_context(vm, context) };
+    }));
+    match result {
+        Ok(()) => log::info!("rlobkit-dialogs: ndk-context initialized"),
+        Err(_) => log::warn!(
+            "rlobkit-dialogs: ndk-context was already initialized by another component; using existing context"
+        ),
+    }
+    init();
 }
 
 fn on_activity_result_internal(

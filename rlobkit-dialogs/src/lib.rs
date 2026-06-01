@@ -16,8 +16,8 @@ mod android;
 
 #[cfg(target_os = "android")]
 pub use android::{
-    helper_activity_available_for_host, on_activity_result, on_activity_result_from_intent,
-    take_writable_fd_for_uri,
+    helper_activity_available_for_host, init_with_context, on_activity_result,
+    on_activity_result_from_intent, take_writable_fd_for_uri,
 };
 
 #[cfg(any(
@@ -43,5 +43,15 @@ pub fn init() {
     #[cfg(target_os = "android")]
     {
         android::init();
+    }
+}
+
+pub fn init_with_android_context(
+    #[cfg(target_os = "android")] vm: *mut std::ffi::c_void,
+    #[cfg(target_os = "android")] context: *mut std::ffi::c_void,
+) {
+    #[cfg(target_os = "android")]
+    {
+        unsafe { android::init_with_context(vm, context) };
     }
 }
