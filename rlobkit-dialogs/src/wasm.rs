@@ -23,7 +23,7 @@ pub async fn open_file_picker(
             Some(handle) => {
                 let name = handle.file_name().to_string();
                 let data = Bytes::from(handle.read().await);
-                Some(vec![PlatformFile::from_blob(name, data)])
+                Some(vec![PlatformFile::from_blob(name, data, None)])
             }
             None => None,
         },
@@ -38,7 +38,7 @@ pub async fn open_file_picker(
                     }
                     let name = handle.file_name().to_string();
                     let data = Bytes::from(handle.read().await);
-                    files.push(PlatformFile::from_blob(name, data));
+                    files.push(PlatformFile::from_blob(name, data, None));
                 }
                 if files.is_empty() { None } else { Some(files) }
             }
@@ -69,7 +69,7 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
     }
 
     let name = file.file_name().to_string();
-    Ok(Some(PlatformFile::from_blob(name, Bytes::new())))
+    Ok(Some(PlatformFile::from_blob(name, Bytes::new(), None)))
 }
 
 pub fn write_file_from_path(

@@ -729,6 +729,50 @@ fn resolve_size(uri_str: &str) -> Option<u64> {
     .flatten()
 }
 
+fn resolve_mime_type(uri_str: &str) -> Option<String> {
+    with_android_env(|env| {
+        let context = current_context(env)?;
+        let resolver = env
+            .call_method(
+                &context,
+                jni_str!("getContentResolver"),
+                jni_sig!("()Landroid/content/ContentResolver;"),
+                &[],
+            )?
+            .l()?;
+
+        let juri_text = JString::new(env, uri_str)?;
+        let juri_class: jni::objects::JClass<'_> = env.find_class(jni_str!("android/net/Uri"))?;
+        let juri = env
+            .call_static_method(
+                juri_class,
+                jni_str!("parse"),
+                jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+                &[JValue::Object(&juri_text.into())],
+            )?
+            .l()?;
+
+        let mime_obj = env
+            .call_method(
+                &resolver,
+                jni_str!("getType"),
+                jni_sig!("(Landroid/net/Uri;)Ljava/lang/String;"),
+                &[JValue::Object(&juri)],
+            )?
+            .l()?;
+
+        if mime_obj.is_null() {
+            return Ok(None);
+        }
+
+        let mime = JString::cast_local(env, mime_obj)?
+            .try_to_string(env)?;
+        Ok(Some(mime))
+    })
+    .ok()
+    .flatten()
+}
+
 fn to_uri_string(env: &mut Env<'_>, uri: &Uri<'_>) -> Result<Option<String>, JniError> {
     if uri.is_null() {
         return Ok(None);
@@ -1269,7 +1313,8 @@ pub async fn open_file_picker(
             .or_else(|| uri.rsplit('/').next().map(|s| s.to_string()));
         let name = display_name.unwrap_or_else(|| "file".to_string());
         let size = resolve_size(&uri);
-        files.push(PlatformFile::from_uri(name, uri, size));
+        let mime_type = resolve_mime_type(&uri);
+        files.push(PlatformFile::from_uri(name, uri, size, mime_type));
     }
 
     Ok(Some(files))
@@ -1339,7 +1384,8 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or(suggested);
-    Ok(Some(PlatformFile::from_uri(name, uri, None)))
+    let mime_type = resolve_mime_type(&uri);
+    Ok(Some(PlatformFile::from_uri(name, uri, None, mime_type)))
 }
 
 /// Register the Android I/O function pointers with `rlobkit-core`. Call this

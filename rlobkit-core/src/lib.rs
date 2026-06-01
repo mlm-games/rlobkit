@@ -38,6 +38,10 @@ pub struct PlatformFile {
     uri: Option<String>,
     data: Option<Bytes>,
     size: Option<u64>,
+    /// Resolved MIME type. Set on Android (from `ContentResolver.getType`) and
+    /// on WASM (from the blob's hint). On desktop, `None` and `extension`/
+    /// `mime_type` derive from the name.
+    mime_type: Option<String>,
 }
 
 impl PlatformFile {
@@ -48,22 +52,29 @@ impl PlatformFile {
             uri: None,
             data: None,
             size: None,
+            mime_type: None,
         }
     }
 
     #[cfg(target_os = "android")]
-    pub fn from_uri(name: impl Into<String>, uri: impl Into<String>, size: Option<u64>) -> Self {
+    pub fn from_uri(
+        name: impl Into<String>,
+        uri: impl Into<String>,
+        size: Option<u64>,
+        mime_type: Option<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             path: None,
             uri: Some(uri.into()),
             data: None,
             size,
+            mime_type,
         }
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn from_blob(name: impl Into<String>, data: Bytes) -> Self {
+    pub fn from_blob(name: impl Into<String>, data: Bytes, mime_type: Option<String>) -> Self {
         let size = Some(data.len() as u64);
         Self {
             name: name.into(),
@@ -71,6 +82,7 @@ impl PlatformFile {
             uri: None,
             data: Some(data),
             size,
+            mime_type,
         }
     }
 
@@ -79,13 +91,20 @@ impl PlatformFile {
         &self.name
     }
 
+    /// File extension, derived from the display name.
     pub fn extension(&self) -> Option<&str> {
         std::path::Path::new(&self.name)
             .extension()
             .and_then(|e| e.to_str())
     }
 
+    /// Returns the resolved MIME when available (Android from
+    /// `ContentResolver.getType`, WASM from the blob's hint), otherwise
+    /// derives from the name's extension.
     pub fn mime_type(&self) -> Option<String> {
+        if let Some(mime) = &self.mime_type {
+            return Some(mime.clone());
+        }
         let ext = self.extension()?;
         Some(
             mime_guess::from_ext(ext)
@@ -235,5 +254,18 @@ impl std::ops::Div<&str> for &PlatformDirectory {
     type Output = PlatformFile;
     fn div(self, rhs: &str) -> PlatformFile {
         self.file(rhs)
+    }
+}
+
+/// Map a MIME type to a primary file extension
+pub fn mime_to_extension(mime: &str) -> Option<&'static str> {
+    if let Some(extensions) = mime_guess::get_mime_extensions_str(mime) {
+        if let Some(ext) = extensions.first() {
+            return Some(ext);
+        }
+    }
+    match mime {
+        "application/x-clap" => Some("clap"),
+        _ => None,
     }
 }
