@@ -16,8 +16,8 @@ mod android;
 
 #[cfg(target_os = "android")]
 pub use android::{
-    helper_activity_available_for_host, init_with_context, on_activity_result,
-    on_activity_result_from_intent, take_writable_fd_for_uri,
+    helper_activity_available_for_host, init_shared_pending_state, init_with_context,
+    on_activity_result, on_activity_result_from_intent, take_writable_fd_for_uri,
 };
 
 #[cfg(any(

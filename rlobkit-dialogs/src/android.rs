@@ -62,9 +62,25 @@ struct ActivityResult {
     open_fd: Option<i32>,
 }
 
+const PENDING_STATE_ENV_KEY: &str = "RLOBKIT_PENDING_STATE_PTR";
+
 fn pending_state() -> &'static (Mutex<PendingRequest>, Condvar) {
+    if let Some(shared) = shared_pending_state() {
+        return shared;
+    }
     static STATE: OnceLock<(Mutex<PendingRequest>, Condvar)> = OnceLock::new();
     STATE.get_or_init(|| (Mutex::new(PendingRequest::default()), Condvar::new()))
+}
+
+fn shared_pending_state() -> Option<&'static (Mutex<PendingRequest>, Condvar)> {
+    static LOOKUP: OnceLock<Option<&'static (Mutex<PendingRequest>, Condvar)>> = OnceLock::new();
+    *LOOKUP.get_or_init(|| {
+        let ptr_str = std::env::var(PENDING_STATE_ENV_KEY).ok()?;
+        let ptr = usize::from_str_radix(ptr_str.trim_start_matches("0x"), 16).ok()?;
+        // SAFETY: the pointer was set by init_shared_pending_state() which Box::leak'd
+        // the allocation, so it is valid for the lifetime of the process.
+        Some(unsafe { &*(ptr as *const (Mutex<PendingRequest>, Condvar)) })
+    })
 }
 
 fn saver_fd_state() -> &'static Mutex<HashMap<String, i32>> {
@@ -1391,6 +1407,27 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
 /// on a URI-backed file). Safe to call more than once.
 pub fn init() {
     set_android_io(android_read_bytes, android_write_bytes);
+}
+
+/// Allocate a shared `PendingRequest` + `Condvar` on the heap and publish
+/// its pointer in the `RLOBKIT_PENDING_STATE_PTR` env var so that both the
+/// host `.so` (yawd) and plugin `.so` (mampler) use the same state for
+/// picker result delivery.
+pub fn init_shared_pending_state() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let state: &'static (Mutex<PendingRequest>, Condvar) = Box::leak(Box::new((
+            Mutex::new(PendingRequest::default()),
+            Condvar::new(),
+        )));
+        let ptr = state as *const _ as usize;
+        let val = format!("0x{:x}", ptr);
+        log::info!("rlobkit-dialogs: init_shared_pending_state ptr={val}");
+        // SAFETY: called once from the main thread during init, before any
+        // picker interaction.
+        unsafe { std::env::set_var(PENDING_STATE_ENV_KEY, &val); }
+    });
 }
 
 /// Initialize the `ndk-context` static from the provided `JavaVM` and `Context`
