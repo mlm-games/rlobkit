@@ -21,7 +21,7 @@ pub async fn open_file_picker(
     let files = match opts.mode {
         RlobKitMode::Single => match dialog.pick_file().await {
             Some(handle) => {
-                let name = handle.file_name();
+                let name = handle.file_name().to_string();
                 let data = Bytes::from(handle.read().await);
                 Some(vec![PlatformFile::from_blob(name, data)])
             }
@@ -36,7 +36,7 @@ pub async fn open_file_picker(
                             break;
                         }
                     }
-                    let name = handle.file_name();
+                    let name = handle.file_name().to_string();
                     let data = Bytes::from(handle.read().await);
                     files.push(PlatformFile::from_blob(name, data));
                 }
@@ -68,7 +68,7 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         let _ = file.write(&data).await;
     }
 
-    let name = file.file_name();
+    let name = file.file_name().to_string();
     Ok(Some(PlatformFile::from_blob(name, Bytes::new())))
 }
 

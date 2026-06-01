@@ -7,193 +7,186 @@ pub use error::RlobKitError;
 
 use bytes::Bytes;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
 use tokio::io::AsyncReadExt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlatformFile {
-    inner: PlatformFileInner,
+/// Android-specific bytes I/O function pointer type.
+///
+/// Set at init time by `rlobkit-dialogs` (which has JNI access) to a function
+/// that reads the content at a `content://` URI and returns the bytes, or
+/// writes bytes to a `content://` URI.
+pub type AndroidReadBytes = fn(&str) -> Result<Bytes, RlobKitError>;
+pub type AndroidWriteBytes = fn(&str, &[u8]) -> Result<(), RlobKitError>;
+
+static ANDROID_READ: OnceLock<AndroidReadBytes> = OnceLock::new();
+static ANDROID_WRITE: OnceLock<AndroidWriteBytes> = OnceLock::new();
+
+/// Register Android I/O implementations. Called by `rlobkit-dialogs::init()`
+/// at app startup. No-op on non-Android targets (the pointers are never
+/// invoked when no `uri` field is set).
+pub fn set_android_io(read: AndroidReadBytes, write: AndroidWriteBytes) {
+    let _ = ANDROID_READ.set(read);
+    let _ = ANDROID_WRITE.set(write);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum PlatformFileInner {
-    Path(PathBuf),
-    #[cfg(target_os = "android")]
-    Uri {
-        uri: String,
-        display_name: Option<String>,
-    },
-    #[cfg(target_arch = "wasm32")]
-    Blob {
-        name: String,
-        data: Bytes,
-    },
+pub struct PlatformFile {
+    name: String,
+    path: Option<PathBuf>,
+    uri: Option<String>,
+    data: Option<Bytes>,
+    size: Option<u64>,
 }
 
 impl PlatformFile {
-    pub fn from_path(path: impl Into<PathBuf>) -> Self {
+    pub fn from_path(name: impl Into<String>, path: impl Into<PathBuf>) -> Self {
         Self {
-            inner: PlatformFileInner::Path(path.into()),
+            name: name.into(),
+            path: Some(path.into()),
+            uri: None,
+            data: None,
+            size: None,
         }
     }
 
     #[cfg(target_os = "android")]
-    #[deprecated = "Use from_uri_with_name instead"]
-    pub fn from_uri(uri: impl Into<String>) -> Self {
+    pub fn from_uri(name: impl Into<String>, uri: impl Into<String>, size: Option<u64>) -> Self {
         Self {
-            inner: PlatformFileInner::Uri {
-                uri: uri.into(),
-                display_name: None,
-            },
-        }
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn from_uri_with_name(uri: impl Into<String>, display_name: Option<String>) -> Self {
-        Self {
-            inner: PlatformFileInner::Uri {
-                uri: uri.into(),
-                display_name,
-            },
+            name: name.into(),
+            path: None,
+            uri: Some(uri.into()),
+            data: None,
+            size,
         }
     }
 
     #[cfg(target_arch = "wasm32")]
     pub fn from_blob(name: impl Into<String>, data: Bytes) -> Self {
+        let size = Some(data.len() as u64);
         Self {
-            inner: PlatformFileInner::Blob {
-                name: name.into(),
-                data,
-            },
+            name: name.into(),
+            path: None,
+            uri: None,
+            data: Some(data),
+            size,
         }
     }
 
-    pub fn name(&self) -> Option<String> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => p.file_name()?.to_str().map(String::from),
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { uri, display_name } => display_name
-                .clone()
-                .or_else(|| uri.split('/').last().map(String::from)),
-            #[cfg(target_arch = "wasm32")]
-            PlatformFileInner::Blob { name, .. } => Some(name.clone()),
-        }
+    /// Display name. Always populated at construction.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
-    pub fn extension(&self) -> Option<String> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => p.extension()?.to_str().map(String::from),
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { .. } => self.name()?.rsplit('.').next().map(String::from),
-            #[cfg(target_arch = "wasm32")]
-            PlatformFileInner::Blob { .. } => self.name()?.rsplit('.').next().map(String::from),
-        }
+    pub fn extension(&self) -> Option<&str> {
+        std::path::Path::new(&self.name)
+            .extension()
+            .and_then(|e| e.to_str())
     }
 
     pub fn mime_type(&self) -> Option<String> {
         let ext = self.extension()?;
         Some(
-            mime_guess::from_ext(&ext)
+            mime_guess::from_ext(ext)
                 .first_or_octet_stream()
                 .to_string(),
         )
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Content URI on Android. Always returns `None` on platforms where the
+    /// file wasn't sourced from a SAF picker. Haven't gated it for checks
+    pub fn uri(&self) -> Option<&str> {
+        self.uri.as_deref()
+    }
+
+    /// In-memory bytes on WASM. Always returns `None` on platforms where the
+    /// file wasn't sourced from a blob picker. Haven't gated it for checks
+    pub fn data(&self) -> Option<&Bytes> {
+        self.data.as_ref()
+    }
+
+    /// Cached size. `None` if not resolved at construction (desktop, or Android
+    /// pickers that didn't query the size).
+    pub fn size(&self) -> Option<u64> {
+        self.size
+    }
+
     pub fn read_bytes(&self) -> Result<Bytes, RlobKitError> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => Ok(Bytes::from(std::fs::read(p)?)),
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
-                "Use read_bytes_async on Android".into(),
-            )),
+        if let Some(p) = &self.path {
+            return Ok(Bytes::from(std::fs::read(p)?));
         }
+        if let Some(u) = &self.uri {
+            let reader = ANDROID_READ.get().ok_or_else(|| {
+                RlobKitError::UnsupportedOperation(
+                    "Android I/O not initialized; call rlobkit_dialogs::init()".into(),
+                )
+            })?;
+            return reader(u);
+        }
+        if let Some(d) = &self.data {
+            return Ok(d.clone());
+        }
+        Err(RlobKitError::UnsupportedOperation(
+            "PlatformFile has no readable source".into(),
+        ))
     }
 
     #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
     pub async fn read_bytes_async(&self) -> Result<Bytes, RlobKitError> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => {
-                let mut file = tokio::fs::File::open(p).await?;
-                let mut buffer = Vec::new();
-                file.read_to_end(&mut buffer).await?;
-                Ok(Bytes::from(buffer))
-            }
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
-                "Use read_file_to_path from rlobkit-dialogs to copy the URI to a local path first"
-                    .into(),
-            )),
+        if let Some(p) = &self.path {
+            let mut file = tokio::fs::File::open(p).await?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).await?;
+            return Ok(Bytes::from(buffer));
         }
+        if let Some(u) = &self.uri {
+            let reader = ANDROID_READ.get().ok_or_else(|| {
+                RlobKitError::UnsupportedOperation(
+                    "Android I/O not initialized; call rlobkit_dialogs::init()".into(),
+                )
+            })?;
+            return reader(u);
+        }
+        Err(RlobKitError::UnsupportedOperation(
+            "PlatformFile has no readable source".into(),
+        ))
     }
 
     #[cfg(target_arch = "wasm32")]
     pub async fn read_bytes_async(&self) -> Result<Bytes, RlobKitError> {
-        match &self.inner {
-            PlatformFileInner::Blob { data, .. } => Ok(data.clone()),
-            _ => Err(RlobKitError::UnsupportedOperation(
-                "Cannot read bytes from this file type on WASM".into(),
-            )),
-        }
+        self.read_bytes()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn write_bytes(&self, data: &[u8]) -> Result<(), RlobKitError> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => Ok(std::fs::write(p, data)?),
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
-                "Use write_bytes_async on Android".into(),
-            )),
+        if let Some(p) = &self.path {
+            std::fs::write(p, data)?;
+            return Ok(());
         }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn write_bytes(&self, _data: &[u8]) -> Result<(), RlobKitError> {
+        if let Some(u) = &self.uri {
+            let writer = ANDROID_WRITE.get().ok_or_else(|| {
+                RlobKitError::UnsupportedOperation(
+                    "Android I/O not initialized; call rlobkit_dialogs::init()".into(),
+                )
+            })?;
+            return writer(u, data);
+        }
+        if self.data.is_some() {
+            return Err(RlobKitError::UnsupportedOperation(
+                "Writing to an in-memory blob is not supported".into(),
+            ));
+        }
         Err(RlobKitError::UnsupportedOperation(
-            "Writing to blob not supported on WASM".into(),
+            "PlatformFile has no writable destination".into(),
         ))
     }
 
     pub fn write_string(&self, s: &str) -> Result<(), RlobKitError> {
         self.write_bytes(s.as_bytes())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn size(&self) -> Result<u64, RlobKitError> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => Ok(std::fs::metadata(p)?.len()),
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
-                "Size is not available for Android URI".into(),
-            )),
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn path(&self) -> Option<&Path> {
-        match &self.inner {
-            PlatformFileInner::Path(p) => Some(p),
-            #[cfg(target_os = "android")]
-            PlatformFileInner::Uri { .. } => None,
-        }
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn uri(&self) -> Option<&str> {
-        match &self.inner {
-            PlatformFileInner::Uri { uri, .. } => Some(uri.as_str()),
-            PlatformFileInner::Path(_) => None,
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn data(&self) -> Option<&Bytes> {
-        match &self.inner {
-            PlatformFileInner::Blob { data, .. } => Some(data),
-            _ => None,
-        }
     }
 }
 
@@ -216,7 +209,7 @@ impl PlatformDirectory {
     }
 
     pub fn file(&self, name: &str) -> PlatformFile {
-        PlatformFile::from_path(self.path.join(name))
+        PlatformFile::from_path(name, self.path.join(name))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -225,7 +218,13 @@ impl PlatformDirectory {
         for entry in std::fs::read_dir(&self.path)? {
             let entry = entry?;
             if entry.file_type()?.is_file() {
-                files.push(PlatformFile::from_path(entry.path()));
+                let path = entry.path();
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                files.push(PlatformFile::from_path(name, path));
             }
         }
         Ok(files)

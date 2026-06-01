@@ -1,5 +1,6 @@
 use crate::RlobKitMode;
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
+use bytes::Bytes;
 use jni::{
     Env, EnvUnowned,
     errors::Error as JniError,
@@ -8,8 +9,9 @@ use jni::{
     refs::Global,
 };
 use jni_min_helper::{android_context, jni_with_env};
-use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
+use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError, set_android_io};
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::os::fd::FromRawFd;
 use std::path::Path;
 use std::sync::{Condvar, Mutex, OnceLock};
@@ -643,6 +645,90 @@ fn resolve_display_name(uri_str: &str) -> Option<String> {
     .flatten()
 }
 
+fn resolve_size(uri_str: &str) -> Option<u64> {
+    with_android_env(|env| {
+        let context = current_context(env)?;
+
+        let resolver = env
+            .call_method(
+                &context,
+                jni_str!("getContentResolver"),
+                jni_sig!("()Landroid/content/ContentResolver;"),
+                &[],
+            )?
+            .l()?;
+
+        let juri_text = JString::new(env, uri_str)?;
+        let juri_class: jni::objects::JClass<'_> = env.find_class(jni_str!("android/net/Uri"))?;
+        let juri = env
+            .call_static_method(
+                juri_class,
+                jni_str!("parse"),
+                jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+                &[JValue::Object(&juri_text.into())],
+            )?
+            .l()?;
+
+        let size_col = JString::new(env, "_size")?;
+        let size_arr = JObjectArray::<JString>::new(env, 1, JString::null())?;
+        size_arr.set_element(env, 0, size_col)?;
+
+        let cursor = env
+            .call_method(
+                &resolver,
+                jni_str!("query"),
+                jni_sig!("(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;"),
+                &[
+                    JValue::Object(&juri),
+                    JValue::Object(&size_arr),
+                    JValue::Object(&JObject::null()),
+                    JValue::Object(&JObject::null()),
+                    JValue::Object(&JObject::null()),
+                ],
+            )?
+            .l()?;
+
+        if cursor.is_null() {
+            return Ok(None);
+        }
+
+        let moved = env
+            .call_method(&cursor, jni_str!("moveToFirst"), jni_sig!("()Z"), &[])?
+            .z()?;
+
+        if !moved {
+            let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
+            return Ok(None);
+        }
+
+        let size_col2 = JString::new(env, "_size")?;
+        let col_idx = env
+            .call_method(
+                &cursor,
+                jni_str!("getColumnIndexOrThrow"),
+                jni_sig!("(Ljava/lang/String;)I"),
+                &[JValue::Object(&size_col2.into())],
+            )?
+            .i()?;
+
+        let size_obj = env
+            .call_method(&cursor, jni_str!("getString"), jni_sig!("(I)Ljava/lang/String;"), &[JValue::Int(col_idx)])?
+            .l()?;
+
+        let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
+
+        if size_obj.is_null() {
+            return Ok(None);
+        }
+
+        let size_str = JString::cast_local(env, size_obj)?
+            .try_to_string(env)?;
+        Ok(size_str.parse::<u64>().ok())
+    })
+    .ok()
+    .flatten()
+}
+
 fn to_uri_string(env: &mut Env<'_>, uri: &Uri<'_>) -> Result<Option<String>, JniError> {
     if uri.is_null() {
         return Ok(None);
@@ -834,91 +920,7 @@ pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), 
         RlobKitError::UnsupportedOperation("Android source is not a content URI".into())
     })?;
 
-    let fd = with_android_env(|env| -> Result<i32, JniError> {
-        let context =
-            current_context(env).map_err(|e| annotate_jni_error(env, "read.context", e))?;
-
-        let resolver = env
-            .call_method(
-                &context,
-                jni_str!("getContentResolver"),
-                jni_sig!("()Landroid/content/ContentResolver;"),
-                &[],
-            )
-            .map_err(|e| annotate_jni_error(env, "read.getContentResolver", e))?
-            .l()
-            .map_err(|e| annotate_jni_error(env, "read.getContentResolver.as_l", e))?;
-
-        let juri_class: jni::objects::JClass<'_> = env
-            .find_class(jni_str!("android/net/Uri"))
-            .map_err(|e| annotate_jni_error(env, "read.findClass(Uri)", e))?;
-        let juri_text = JString::new(env, uri)
-            .map_err(|e| annotate_jni_error(env, "read.newString(uri)", e))?;
-        let juri = env
-            .call_static_method(
-                juri_class,
-                jni_str!("parse"),
-                jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
-                &[JValue::Object(&juri_text.into())],
-            )
-            .map_err(|e| annotate_jni_error(env, "read.Uri.parse", e))?
-            .l()
-            .map_err(|e| annotate_jni_error(env, "read.Uri.parse.as_l", e))?;
-
-        best_effort_grant_self_uri_permission(
-            env,
-            &context,
-            &juri,
-            FLAG_GRANT_READ_URI_PERMISSION,
-            uri,
-        );
-        best_effort_take_persistable_uri_permission(
-            env,
-            &resolver,
-            &juri,
-            FLAG_GRANT_READ_URI_PERMISSION,
-            uri,
-        );
-
-        let mode = JString::new(env, "r")
-            .map_err(|e| annotate_jni_error(env, "read.newString(mode)", e))?;
-        let mode_obj: JObject<'_> = mode.into();
-
-        let pfd = match env.call_method(
-            &resolver,
-            jni_str!("openFileDescriptor"),
-            jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;"),
-            &[JValue::Object(&juri), JValue::Object(&mode_obj)],
-        ) {
-            Ok(value) => value
-                .l()
-                .map_err(|e| annotate_jni_error(env, "read.openFileDescriptor.as_l", e))?,
-            Err(JniError::JavaException) => {
-                let _ = env.exception_catch();
-                return Err(JniError::MethodNotFound {
-                    name: "openFileDescriptor".into(),
-                    sig: "Java exception".into(),
-                });
-            }
-            Err(other) => return Err(annotate_jni_error(env, "read.openFileDescriptor", other)),
-        };
-
-        if pfd.is_null() {
-            return Err(JniError::MethodNotFound {
-                name: "openFileDescriptor".into(),
-                sig: "returned null".into(),
-            });
-        }
-
-        let fd = env
-            .call_method(&pfd, jni_str!("detachFd"), jni_sig!("()I"), &[])
-            .map_err(|e| annotate_jni_error(env, "read.detachFd", e))?
-            .i()
-            .map_err(|e| annotate_jni_error(env, "read.detachFd.as_i", e))?;
-
-        let _ = env.delete_local_ref(pfd);
-        Ok(fd)
-    })?;
+    let fd = with_android_env(|env| open_readable_fd_for_uri(env, uri))?;
 
     if fd < 0 {
         return Err(RlobKitError::UnsupportedOperation(format!(
@@ -934,6 +936,105 @@ pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), 
     Ok(())
 }
 
+fn open_readable_fd_for_uri(env: &mut Env<'_>, uri: &str) -> Result<i32, JniError> {
+    let context = current_context(env).map_err(|e| annotate_jni_error(env, "read.context", e))?;
+
+    let resolver = env
+        .call_method(
+            &context,
+            jni_str!("getContentResolver"),
+            jni_sig!("()Landroid/content/ContentResolver;"),
+            &[],
+        )
+        .map_err(|e| annotate_jni_error(env, "read.getContentResolver", e))?
+        .l()
+        .map_err(|e| annotate_jni_error(env, "read.getContentResolver.as_l", e))?;
+
+    let juri_class: jni::objects::JClass<'_> = env
+        .find_class(jni_str!("android/net/Uri"))
+        .map_err(|e| annotate_jni_error(env, "read.findClass(Uri)", e))?;
+    let juri_text = JString::new(env, uri)
+        .map_err(|e| annotate_jni_error(env, "read.newString(uri)", e))?;
+    let juri = env
+        .call_static_method(
+            juri_class,
+            jni_str!("parse"),
+            jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+            &[JValue::Object(&juri_text.into())],
+        )
+        .map_err(|e| annotate_jni_error(env, "read.Uri.parse", e))?
+        .l()
+        .map_err(|e| annotate_jni_error(env, "read.Uri.parse.as_l", e))?;
+
+    best_effort_grant_self_uri_permission(
+        env,
+        &context,
+        &juri,
+        FLAG_GRANT_READ_URI_PERMISSION,
+        uri,
+    );
+    best_effort_take_persistable_uri_permission(
+        env,
+        &resolver,
+        &juri,
+        FLAG_GRANT_READ_URI_PERMISSION,
+        uri,
+    );
+
+    let mode = JString::new(env, "r")
+        .map_err(|e| annotate_jni_error(env, "read.newString(mode)", e))?;
+    let mode_obj: JObject<'_> = mode.into();
+
+    let pfd = match env.call_method(
+        &resolver,
+        jni_str!("openFileDescriptor"),
+        jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;"),
+        &[JValue::Object(&juri), JValue::Object(&mode_obj)],
+    ) {
+        Ok(value) => value
+            .l()
+            .map_err(|e| annotate_jni_error(env, "read.openFileDescriptor.as_l", e))?,
+        Err(JniError::JavaException) => {
+            let _ = env.exception_catch();
+            return Err(JniError::MethodNotFound {
+                name: "openFileDescriptor".into(),
+                sig: "Java exception".into(),
+            });
+        }
+        Err(other) => return Err(annotate_jni_error(env, "read.openFileDescriptor", other)),
+    };
+
+    if pfd.is_null() {
+        return Err(JniError::MethodNotFound {
+            name: "openFileDescriptor".into(),
+            sig: "returned null".into(),
+        });
+    }
+
+    let fd = env
+        .call_method(&pfd, jni_str!("detachFd"), jni_sig!("()I"), &[])
+        .map_err(|e| annotate_jni_error(env, "read.detachFd", e))?
+        .i()
+        .map_err(|e| annotate_jni_error(env, "read.detachFd.as_i", e))?;
+
+    let _ = env.delete_local_ref(pfd);
+    Ok(fd)
+}
+
+fn android_read_bytes(uri: &str) -> Result<Bytes, RlobKitError> {
+    let fd = with_android_env(|env| open_readable_fd_for_uri(env, uri))?;
+    if fd < 0 {
+        return Err(RlobKitError::UnsupportedOperation(format!(
+            "Failed to obtain readable file descriptor (fd={})",
+            fd
+        )));
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).map_err(RlobKitError::from)?;
+    Ok(Bytes::from(buf))
+}
+
 pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result<(), RlobKitError> {
     let uri = target.uri().ok_or_else(|| {
         RlobKitError::UnsupportedOperation("Android target is not a content URI".into())
@@ -943,103 +1044,18 @@ pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result
         let mut source = std::fs::File::open(source_path)?;
         let mut sink = unsafe { std::fs::File::from_raw_fd(fd) };
         std::io::copy(&mut source, &mut sink)?;
-        use std::io::Write;
         sink.flush()?;
         return Ok(());
     }
 
     with_android_env(|env| {
-        let context =
-            current_context(env).map_err(|e| annotate_jni_error(env, "write.context", e))?;
-        let resolver = env
-            .call_method(
-                &context,
-                jni_str!("getContentResolver"),
-                jni_sig!("()Landroid/content/ContentResolver;"),
-                &[],
-            )
-            .map_err(|e| annotate_jni_error(env, "write.getContentResolver", e))?
-            .l()
-            .map_err(|e| annotate_jni_error(env, "write.getContentResolver.as_l", e))?;
-
-        let juri_class: jni::objects::JClass<'_> = env
-            .find_class(jni_str!("android/net/Uri"))
-            .map_err(|e| annotate_jni_error(env, "write.findClass(Uri)", e))?;
-        let juri_text = JString::new(env, uri)
-            .map_err(|e| annotate_jni_error(env, "write.newString(uri)", e))?;
-        let juri = env
-            .call_static_method(
-                juri_class,
-                jni_str!("parse"),
-                jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
-                &[JValue::Object(&juri_text.into())],
-            )
-            .map_err(|e| annotate_jni_error(env, "write.Uri.parse", e))?
-            .l()
-            .map_err(|e| annotate_jni_error(env, "write.Uri.parse.as_l", e))?;
-
-        best_effort_grant_self_uri_permission(
-            env,
-            &context,
-            &juri,
-            FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_WRITE_URI_PERMISSION,
-            uri,
-        );
-        best_effort_take_persistable_uri_permission(
-            env,
-            &resolver,
-            &juri,
-            FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_WRITE_URI_PERMISSION,
-            uri,
-        );
-
-        let out_stream = {
-            let mode = JString::new(env, "wt")
-                .map_err(|e| annotate_jni_error(env, "write.newString(mode)", e))?;
-            let mode_obj: JObject<'_> = mode.into();
-            match env.call_method(
-                &resolver,
-                jni_str!("openOutputStream"),
-                jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;"),
-                &[JValue::Object(&juri), JValue::Object(&mode_obj)],
-            ) {
-                Ok(value) => value
-                    .l()
-                    .map_err(|e| annotate_jni_error(env, "write.openOutputStream(wt).as_l", e))?,
-                Err(JniError::JavaException) => {
-                    let _ = env.exception_catch();
-                    env.call_method(
-                        &resolver,
-                        jni_str!("openOutputStream"),
-                        jni_sig!("(Landroid/net/Uri;)Ljava/io/OutputStream;"),
-                        &[JValue::Object(&juri)],
-                    )
-                    .map_err(|e| annotate_jni_error(env, "write.openOutputStream(default)", e))?
-                    .l()
-                    .map_err(|e| {
-                        annotate_jni_error(env, "write.openOutputStream(default).as_l", e)
-                    })?
-                }
-                Err(other) => {
-                    return Err(annotate_jni_error(env, "write.openOutputStream(wt)", other));
-                }
-            }
-        };
-
-        if out_stream.is_null() {
-            return Err(JniError::MethodNotFound {
-                name: "openOutputStream".into(),
-                sig: "returned null".into(),
-            });
-        }
-
+        let out_stream = open_output_stream_for_uri(env, uri)?;
         let mut file = std::fs::File::open(source_path).map_err(|e| JniError::MethodNotFound {
             name: "File.open".into(),
             sig: format!("{}: {e}", source_path.display()),
         })?;
         let mut buf = [0u8; 64 * 1024];
         loop {
-            use std::io::Read;
             let n = file.read(&mut buf).map_err(|e| JniError::MethodNotFound {
                 name: "File.read".into(),
                 sig: e.to_string(),
@@ -1047,28 +1063,153 @@ pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result
             if n == 0 {
                 break;
             }
-
-            let jarr: JByteArray<'_> = env
-                .new_byte_array(n)
-                .map_err(|e| annotate_jni_error(env, "write.new_byte_array", e))?;
-            let tmp_i8: &[i8] = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const i8, n) };
-            jarr.set_region(env, 0, tmp_i8)
-                .map_err(|e| annotate_jni_error(env, "write.set_byte_array_region", e))?;
-            let jarr_obj: JObject<'_> = jarr.into();
-            env.call_method(
-                &out_stream,
-                jni_str!("write"),
-                jni_sig!("([B)V"),
-                &[JValue::Object(&jarr_obj)],
-            )
-            .map_err(|e| annotate_jni_error(env, "write.OutputStream.write", e))?;
-            let _ = env.delete_local_ref(jarr_obj);
+            write_bytes_to_output_stream(env, &out_stream, &buf[..n])?;
         }
+        flush_and_close_output_stream(env, &out_stream)?;
+        Ok(())
+    })
+}
 
-        env.call_method(&out_stream, jni_str!("flush"), jni_sig!("()V"), &[])
-            .map_err(|e| annotate_jni_error(env, "write.OutputStream.flush", e))?;
-        env.call_method(&out_stream, jni_str!("close"), jni_sig!("()V"), &[])
-            .map_err(|e| annotate_jni_error(env, "write.OutputStream.close", e))?;
+fn open_output_stream_for_uri<'a>(
+    env: &mut Env<'a>,
+    uri: &str,
+) -> Result<JObject<'a>, JniError> {
+    let context = current_context(env).map_err(|e| annotate_jni_error(env, "write.context", e))?;
+    let resolver = env
+        .call_method(
+            &context,
+            jni_str!("getContentResolver"),
+            jni_sig!("()Landroid/content/ContentResolver;"),
+            &[],
+        )
+        .map_err(|e| annotate_jni_error(env, "write.getContentResolver", e))?
+        .l()
+        .map_err(|e| annotate_jni_error(env, "write.getContentResolver.as_l", e))?;
+
+    let juri_class: jni::objects::JClass<'_> = env
+        .find_class(jni_str!("android/net/Uri"))
+        .map_err(|e| annotate_jni_error(env, "write.findClass(Uri)", e))?;
+    let juri_text = JString::new(env, uri)
+        .map_err(|e| annotate_jni_error(env, "write.newString(uri)", e))?;
+    let juri = env
+        .call_static_method(
+            juri_class,
+            jni_str!("parse"),
+            jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+            &[JValue::Object(&juri_text.into())],
+        )
+        .map_err(|e| annotate_jni_error(env, "write.Uri.parse", e))?
+        .l()
+        .map_err(|e| annotate_jni_error(env, "write.Uri.parse.as_l", e))?;
+
+    best_effort_grant_self_uri_permission(
+        env,
+        &context,
+        &juri,
+        FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_WRITE_URI_PERMISSION,
+        uri,
+    );
+    best_effort_take_persistable_uri_permission(
+        env,
+        &resolver,
+        &juri,
+        FLAG_GRANT_READ_URI_PERMISSION | FLAG_GRANT_WRITE_URI_PERMISSION,
+        uri,
+    );
+
+    let mode = JString::new(env, "wt")
+        .map_err(|e| annotate_jni_error(env, "write.newString(mode)", e))?;
+    let mode_obj: JObject<'_> = mode.into();
+
+    let out_stream = match env.call_method(
+        &resolver,
+        jni_str!("openOutputStream"),
+        jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;"),
+        &[JValue::Object(&juri), JValue::Object(&mode_obj)],
+    ) {
+        Ok(value) => value
+            .l()
+            .map_err(|e| annotate_jni_error(env, "write.openOutputStream(wt).as_l", e))?,
+        Err(JniError::JavaException) => {
+            let _ = env.exception_catch();
+            env.call_method(
+                &resolver,
+                jni_str!("openOutputStream"),
+                jni_sig!("(Landroid/net/Uri;)Ljava/io/OutputStream;"),
+                &[JValue::Object(&juri)],
+            )
+            .map_err(|e| annotate_jni_error(env, "write.openOutputStream(default)", e))?
+            .l()
+            .map_err(|e| {
+                annotate_jni_error(env, "write.openOutputStream(default).as_l", e)
+            })?
+        }
+        Err(other) => {
+            return Err(annotate_jni_error(env, "write.openOutputStream(wt)", other));
+        }
+    };
+
+    if out_stream.is_null() {
+        return Err(JniError::MethodNotFound {
+            name: "openOutputStream".into(),
+            sig: "returned null".into(),
+        });
+    }
+
+    Ok(out_stream)
+}
+
+fn write_bytes_to_output_stream(
+    env: &mut Env<'_>,
+    out_stream: &JObject<'_>,
+    data: &[u8],
+) -> Result<(), JniError> {
+    let mut offset = 0;
+    while offset < data.len() {
+        let chunk_len = (data.len() - offset).min(64 * 1024);
+        let chunk = &data[offset..offset + chunk_len];
+        let jarr: JByteArray<'_> = env
+            .new_byte_array(chunk_len)
+            .map_err(|e| annotate_jni_error(env, "write.new_byte_array", e))?;
+        let tmp_i8: &[i8] = unsafe { std::slice::from_raw_parts(chunk.as_ptr() as *const i8, chunk_len) };
+        jarr.set_region(env, 0, tmp_i8)
+            .map_err(|e| annotate_jni_error(env, "write.set_byte_array_region", e))?;
+        let jarr_obj: JObject<'_> = jarr.into();
+        env.call_method(
+            out_stream,
+            jni_str!("write"),
+            jni_sig!("([B)V"),
+            &[JValue::Object(&jarr_obj)],
+        )
+        .map_err(|e| annotate_jni_error(env, "write.OutputStream.write", e))?;
+        let _ = env.delete_local_ref(jarr_obj);
+        offset += chunk_len;
+    }
+    Ok(())
+}
+
+fn flush_and_close_output_stream(
+    env: &mut Env<'_>,
+    out_stream: &JObject<'_>,
+) -> Result<(), JniError> {
+    env.call_method(out_stream, jni_str!("flush"), jni_sig!("()V"), &[])
+        .map_err(|e| annotate_jni_error(env, "write.OutputStream.flush", e))?;
+    env.call_method(out_stream, jni_str!("close"), jni_sig!("()V"), &[])
+        .map_err(|e| annotate_jni_error(env, "write.OutputStream.close", e))?;
+    Ok(())
+}
+
+fn android_write_bytes(uri: &str, data: &[u8]) -> Result<(), RlobKitError> {
+    if let Some(fd) = take_writable_fd_for_uri(uri) {
+        let mut sink = unsafe { std::fs::File::from_raw_fd(fd) };
+        sink.write_all(data)?;
+        sink.flush()?;
+        return Ok(());
+    }
+    with_android_env(|env| {
+        let out_stream = open_output_stream_for_uri(env, uri)?;
+        write_bytes_to_output_stream(env, &out_stream, data)?;
+        flush_and_close_output_stream(env, &out_stream)?;
         Ok(())
     })
 }
@@ -1124,8 +1265,11 @@ pub async fn open_file_picker(
                 err
             );
         }
-        let display_name = resolve_display_name(&uri);
-        files.push(PlatformFile::from_uri_with_name(uri, display_name));
+        let display_name = resolve_display_name(&uri)
+            .or_else(|| uri.rsplit('/').next().map(|s| s.to_string()));
+        let name = display_name.unwrap_or_else(|| "file".to_string());
+        let size = resolve_size(&uri);
+        files.push(PlatformFile::from_uri(name, uri, size));
     }
 
     Ok(Some(files))
@@ -1181,14 +1325,28 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         stash_writable_fd_for_uri(&uri, fd);
     }
 
-    if let Err(err) = take_persistable_uri_permission(&uri, grant_flags) {
+    if let Err(_err) = take_persistable_uri_permission(&uri, grant_flags) {
         log::warn!(
             "rlobkit-dialogs: failed to persist save URI permission for {}: {}",
             uri,
-            err
+            grant_flags
         );
     }
-    Ok(Some(PlatformFile::from_uri(uri)))
+    let suggested = opts.suggested_name.clone().unwrap_or_else(|| "untitled".to_string());
+    let name = uri
+        .rsplit('/')
+        .next()
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(suggested);
+    Ok(Some(PlatformFile::from_uri(name, uri, None)))
+}
+
+/// Register the Android I/O function pointers with `rlobkit-core`. Call this
+/// at app startup (before any `PlatformFile::read_bytes` or `write_bytes` call
+/// on a URI-backed file). Safe to call more than once.
+pub fn init() {
+    set_android_io(android_read_bytes, android_write_bytes);
 }
 
 fn on_activity_result_internal(

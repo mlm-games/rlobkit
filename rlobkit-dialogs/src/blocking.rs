@@ -6,6 +6,7 @@ use crate::RlobKitType;
 use crate::mode::RlobKitMode;
 #[cfg(not(target_os = "android"))]
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
+#[cfg(not(target_os = "android"))]
 use std::path::PathBuf;
 
 #[cfg(not(target_os = "android"))]

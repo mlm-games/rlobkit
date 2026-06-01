@@ -171,7 +171,11 @@ impl RlobKit {
         {
             let target = Self::open_file_saver(opts).await?;
             if let Some(file) = &target {
-                let temp_name = file.name().unwrap_or_else(|| "export.bin".into());
+                let temp_name = if file.name().is_empty() {
+                    "export.bin".to_string()
+                } else {
+                    file.name().to_string()
+                };
                 let temp = std::env::temp_dir().join(temp_name);
                 std::fs::write(&temp, data)?;
                 Self::write_file_from_path(file, &temp)?;

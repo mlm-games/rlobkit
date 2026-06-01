@@ -29,10 +29,11 @@ pub async fn open_file_picker(
     }
 
     let files = match opts.mode {
-        RlobKitMode::Single => dialog
-            .pick_file()
-            .await
-            .map(|f| vec![PlatformFile::from_path(f.path().to_path_buf())]),
+        RlobKitMode::Single => dialog.pick_file().await.map(|f| {
+            let path = f.path().to_path_buf();
+            let name = f.file_name();
+            vec![PlatformFile::from_path(name, path)]
+        }),
         RlobKitMode::Multiple { limit } => {
             let files = dialog.pick_files().await;
             if let Some(files) = files {
@@ -43,7 +44,9 @@ pub async fn open_file_picker(
                             break;
                         }
                     }
-                    result.push(PlatformFile::from_path(f.path().to_path_buf()));
+                    let path = f.path().to_path_buf();
+                    let name = f.file_name();
+                    result.push(PlatformFile::from_path(name, path));
                 }
                 if result.is_empty() {
                     None
@@ -99,10 +102,11 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         }
     }
 
-    Ok(dialog
-        .save_file()
-        .await
-        .map(|f| PlatformFile::from_path(f.path().to_path_buf())))
+    Ok(dialog.save_file().await.map(|f| {
+        let path = f.path().to_path_buf();
+        let name = f.file_name();
+        PlatformFile::from_path(name, path)
+    }))
 }
 
 pub fn write_file_from_path(target: &PlatformFile, source_path: &Path) -> Result<(), RlobKitError> {

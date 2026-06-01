@@ -34,3 +34,14 @@ pub use mode::RlobKitMode;
 pub use picker::{OpenDirectoryOptions, OpenFileOptions, RlobKit, SaveFileOptions};
 pub use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
 pub use types::RlobKitType;
+
+/// Register platform-specific I/O callbacks. Must be called once at app
+/// startup on Android before any `PlatformFile::read_bytes` or
+/// `PlatformFile::write_bytes` is invoked on a URI-backed file. No-op on
+/// other platforms.
+pub fn init() {
+    #[cfg(target_os = "android")]
+    {
+        android::init();
+    }
+}
