@@ -557,6 +557,92 @@ fn start_helper_activity_for_result(
     })
 }
 
+fn resolve_display_name(uri_str: &str) -> Option<String> {
+    with_android_env(|env| {
+        let context = current_context(env)?;
+
+        let resolver = env
+            .call_method(
+                &context,
+                jni_str!("getContentResolver"),
+                jni_sig!("()Landroid/content/ContentResolver;"),
+                &[],
+            )?
+            .l()?;
+
+        let juri_text = JString::new(env, uri_str)?;
+        let juri_class: jni::objects::JClass<'_> = env.find_class(jni_str!("android/net/Uri"))?;
+        let juri = env
+            .call_static_method(
+                juri_class,
+                jni_str!("parse"),
+                jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+                &[JValue::Object(&juri_text.into())],
+            )?
+            .l()?;
+
+        // Projection: new String[]{"_display_name"}
+        let name_col = JString::new(env, "_display_name")?;
+        let name_arr = JObjectArray::<JString>::new(env, 1, JString::null())?;
+        name_arr.set_element(env, 0, name_col)?;
+
+        let cursor = env
+            .call_method(
+                &resolver,
+                jni_str!("query"),
+                jni_sig!("(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;"),
+                &[
+                    JValue::Object(&juri),
+                    JValue::Object(&name_arr),
+                    JValue::Object(&JObject::null()),
+                    JValue::Object(&JObject::null()),
+                    JValue::Object(&JObject::null()),
+                ],
+            )?
+            .l()?;
+
+        if cursor.is_null() {
+            return Ok(None);
+        }
+
+        let moved = env
+            .call_method(&cursor, jni_str!("moveToFirst"), jni_sig!("()Z"), &[])?
+            .z()?;
+
+        if !moved {
+            let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
+            return Ok(None);
+        }
+
+        let name_col2 = JString::new(env, "_display_name")?;
+        let col_idx = env
+            .call_method(
+                &cursor,
+                jni_str!("getColumnIndexOrThrow"),
+                jni_sig!("(Ljava/lang/String;)I"),
+                &[JValue::Object(&name_col2.into())],
+            )?
+            .i()?;
+
+        let name_obj = env
+            .call_method(&cursor, jni_str!("getString"), jni_sig!("(I)Ljava/lang/String;"), &[JValue::Int(col_idx)])?
+            .l()?;
+
+        let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
+
+        if name_obj.is_null() {
+            return Ok(None);
+        }
+
+        let name = JString::cast_local(env, name_obj)?
+            .try_to_string(env)?;
+
+        Ok(Some(name))
+    })
+    .ok()
+    .flatten()
+}
+
 fn to_uri_string(env: &mut Env<'_>, uri: &Uri<'_>) -> Result<Option<String>, JniError> {
     if uri.is_null() {
         return Ok(None);
@@ -1038,7 +1124,8 @@ pub async fn open_file_picker(
                 err
             );
         }
-        files.push(PlatformFile::from_uri(uri));
+        let display_name = resolve_display_name(&uri);
+        files.push(PlatformFile::from_uri_with_name(uri, display_name));
     }
 
     Ok(Some(files))

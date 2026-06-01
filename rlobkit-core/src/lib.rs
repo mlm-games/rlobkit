@@ -20,7 +20,10 @@ pub struct PlatformFile {
 enum PlatformFileInner {
     Path(PathBuf),
     #[cfg(target_os = "android")]
-    Uri(String),
+    Uri {
+        uri: String,
+        display_name: Option<String>,
+    },
     #[cfg(target_arch = "wasm32")]
     Blob {
         name: String,
@@ -36,9 +39,23 @@ impl PlatformFile {
     }
 
     #[cfg(target_os = "android")]
+    #[deprecated = "Use from_uri_with_name instead"]
     pub fn from_uri(uri: impl Into<String>) -> Self {
         Self {
-            inner: PlatformFileInner::Uri(uri.into()),
+            inner: PlatformFileInner::Uri {
+                uri: uri.into(),
+                display_name: None,
+            },
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn from_uri_with_name(uri: impl Into<String>, display_name: Option<String>) -> Self {
+        Self {
+            inner: PlatformFileInner::Uri {
+                uri: uri.into(),
+                display_name,
+            },
         }
     }
 
@@ -56,7 +73,9 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Path(p) => p.file_name()?.to_str().map(String::from),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(u) => u.split('/').last().map(String::from),
+            PlatformFileInner::Uri { uri, display_name } => display_name
+                .clone()
+                .or_else(|| uri.split('/').last().map(String::from)),
             #[cfg(target_arch = "wasm32")]
             PlatformFileInner::Blob { name, .. } => Some(name.clone()),
         }
@@ -66,7 +85,7 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Path(p) => p.extension()?.to_str().map(String::from),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_) => self.name()?.rsplit('.').next().map(String::from),
+            PlatformFileInner::Uri { .. } => self.name()?.rsplit('.').next().map(String::from),
             #[cfg(target_arch = "wasm32")]
             PlatformFileInner::Blob { .. } => self.name()?.rsplit('.').next().map(String::from),
         }
@@ -86,7 +105,7 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Path(p) => Ok(Bytes::from(std::fs::read(p)?)),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
+            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
                 "Use read_bytes_async on Android".into(),
             )),
         }
@@ -102,7 +121,7 @@ impl PlatformFile {
                 Ok(Bytes::from(buffer))
             }
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
+            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
                 "Use read_file_to_path from rlobkit-dialogs to copy the URI to a local path first"
                     .into(),
             )),
@@ -124,7 +143,7 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Path(p) => Ok(std::fs::write(p, data)?),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
+            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
                 "Use write_bytes_async on Android".into(),
             )),
         }
@@ -146,7 +165,7 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Path(p) => Ok(std::fs::metadata(p)?.len()),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_) => Err(RlobKitError::UnsupportedOperation(
+            PlatformFileInner::Uri { .. } => Err(RlobKitError::UnsupportedOperation(
                 "Size is not available for Android URI".into(),
             )),
         }
@@ -157,14 +176,14 @@ impl PlatformFile {
         match &self.inner {
             PlatformFileInner::Path(p) => Some(p),
             #[cfg(target_os = "android")]
-            PlatformFileInner::Uri(_) => None,
+            PlatformFileInner::Uri { .. } => None,
         }
     }
 
     #[cfg(target_os = "android")]
     pub fn uri(&self) -> Option<&str> {
         match &self.inner {
-            PlatformFileInner::Uri(uri) => Some(uri.as_str()),
+            PlatformFileInner::Uri { uri, .. } => Some(uri.as_str()),
             PlatformFileInner::Path(_) => None,
         }
     }
