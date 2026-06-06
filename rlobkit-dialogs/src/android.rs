@@ -13,7 +13,7 @@ use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError, set_android_io
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::fd::FromRawFd;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -1331,6 +1331,50 @@ pub async fn open_file_picker(
     Ok(Some(files))
 }
 
+fn resolve_saf_tree_to_path(uri_str: &str) -> Option<PathBuf> {
+    if !uri_str.starts_with("content://") {
+        return Some(PathBuf::from(uri_str));
+    }
+    let tree_id = uri_str.split("/tree/").nth(1)?.split('?').next()?;
+    let decoded = percent_decode(tree_id)?;
+    if let Some(rest) = decoded.strip_prefix("primary:") {
+        let external = with_android_env(|env| -> Result<String, JniError> {
+            let cls = env.find_class(jni_str!("android/os/Environment"))?;
+            let path_obj = env.call_static_method(
+                cls,
+                jni_str!("getExternalStorageDirectory"),
+                jni_sig!("()Ljava/io/File;"),
+                &[],
+            )?.l()?;
+            let jpath = env.call_method(
+                &path_obj,
+                jni_str!("getAbsolutePath"),
+                jni_sig!("()Ljava/lang/String;"),
+                &[],
+            )?.l()?;
+            let jstr = JString::cast_local(env, jpath)?;
+            Ok(jstr.mutf8_chars(env)?.to_string())
+        }).ok()?;
+        return Some(PathBuf::from(external).join(rest));
+    }
+    None
+}
+
+fn percent_decode(s: &str) -> Option<String> {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hi = chars.next()?.to_digit(16)?;
+            let lo = chars.next()?.to_digit(16)?;
+            out.push(char::from((hi * 16 + lo) as u8));
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
 pub async fn open_directory_picker(
     opts: OpenDirectoryOptions,
 ) -> Result<Option<PlatformDirectory>, RlobKitError> {
@@ -1352,7 +1396,9 @@ pub async fn open_directory_picker(
             err
         );
     }
-    Ok(Some(PlatformDirectory::new(uri)))
+
+    let path = resolve_saf_tree_to_path(&uri).unwrap_or_else(|| PathBuf::from(&uri));
+    Ok(Some(PlatformDirectory::new(path)))
 }
 
 pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
