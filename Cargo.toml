@@ -7,6 +7,9 @@ version = "0.2.2"
 edition = "2024"
 authors = ["mlm-games"]
 license = "MIT"
+description = "Partially cross-platform file-picking toolkit"
+repository = "https://github.com/mlm-games/rlobkit"
+homepage = "https://github.com/mlm-games/rlobkit"
 
 [workspace.dependencies]
 rlobkit-core = { version = "0.2.1", path = "rlobkit-core" }
