@@ -1,20 +1,20 @@
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use crate::RlobKit;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use crate::RlobKitType;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use crate::mode::RlobKitMode;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use crate::picker::{OpenDirectoryOptions, OpenFileOptions, SaveFileOptions};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use std::path::PathBuf;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 fn block_on_runtime<T>(future: impl std::future::Future<Output = T>) -> T {
     pollster::block_on(future)
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub fn blocking_open_file(title: &str, extensions: &[&str]) -> Option<PathBuf> {
     let exts: Vec<String> = extensions.iter().map(|s| s.to_string()).collect();
     block_on_runtime(async {
@@ -37,7 +37,7 @@ pub fn blocking_open_file(title: &str, extensions: &[&str]) -> Option<PathBuf> {
     })
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub fn blocking_save_file(title: &str, suggested_name: &str, extension: &str) -> Option<PathBuf> {
     block_on_runtime(async {
         let exts: Vec<String> = extension
@@ -63,7 +63,7 @@ pub fn blocking_save_file(title: &str, suggested_name: &str, extension: &str) ->
     })
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub fn blocking_pick_files(title: &str, extensions: &[&str]) -> Vec<PathBuf> {
     let exts: Vec<String> = extensions.iter().map(|s| s.to_string()).collect();
     block_on_runtime(async {
@@ -87,7 +87,7 @@ pub fn blocking_pick_files(title: &str, extensions: &[&str]) -> Vec<PathBuf> {
     })
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub fn blocking_pick_directory(title: &str) -> Option<PathBuf> {
     block_on_runtime(async {
         let result = RlobKit::open_directory_picker(OpenDirectoryOptions {

@@ -9,7 +9,7 @@ pub mod types;
 mod desktop;
 
 #[cfg(target_arch = "wasm32")]
-mod desktop;
+mod wasm;
 
 #[cfg(target_os = "android")]
 mod android;
@@ -20,12 +20,7 @@ pub use android::{
     on_activity_result, on_activity_result_from_intent, take_writable_fd_for_uri,
 };
 
-#[cfg(any(
-    target_os = "windows",
-    target_os = "macos",
-    target_os = "linux",
-    target_arch = "wasm32"
-))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 pub use blocking::{
     blocking_open_file, blocking_pick_directory, blocking_pick_files, blocking_save_file,
 };
