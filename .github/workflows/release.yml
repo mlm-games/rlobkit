@@ -5,6 +5,12 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      mark_prerelease:
+        description: "Mark as prerelease"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -23,6 +29,7 @@ jobs:
       version_name: ${{ steps.meta.outputs.version_name }}
       tag: ${{ steps.meta.outputs.tag }}
       commit_sha: ${{ steps.meta.outputs.commit_sha }}
+      is_prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
       release_notes: ${{ steps.notes.outputs.release-notes }}
     steps:
       - uses: actions/checkout@v6
@@ -63,6 +70,17 @@ jobs:
           if [ "v$VERSION" != "${{ steps.meta.outputs.tag }}" ]; then
             echo "Version mismatch: tag ${{ steps.meta.outputs.tag }} != Cargo.toml v$VERSION"
             exit 1
+          fi
+
+      - name: Detect prerelease
+        id: prerelease
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.mark_prerelease }}" == "true" ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ steps.meta.outputs.version_name }}" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: Swatinem/rust-cache@v2
@@ -111,4 +129,5 @@ jobs:
           name: ${{ needs.prepare-version.outputs.tag }}
           target_commitish: ${{ needs.prepare-version.outputs.commit_sha }}
           generate_release_notes: true
+          prerelease: ${{ needs.prepare-version.outputs.is_prerelease }}
           body: ${{ needs.prepare-version.outputs.release_notes }}

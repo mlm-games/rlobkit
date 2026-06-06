@@ -7,3 +7,6 @@ version = "0.2.2"
 edition = "2024"
 authors = ["mlm-games"]
 license = "MIT"
+
+[workspace.dependencies]
+rlobkit-core = { version = "0.2.1", path = "rlobkit-core" }
