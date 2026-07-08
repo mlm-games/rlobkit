@@ -3,7 +3,7 @@ members = ["rlobkit-core", "rlobkit-dialogs", "rlobkit-image"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 authors = ["mlm-games"]
 license = "MIT"
@@ -12,4 +12,4 @@ repository = "https://github.com/mlm-games/rlobkit"
 homepage = "https://github.com/mlm-games/rlobkit"
 
 [workspace.dependencies]
-rlobkit-core = { version = "0.2.3", path = "rlobkit-core" }
+rlobkit-core = { version = "^0", path = "rlobkit-core" }
