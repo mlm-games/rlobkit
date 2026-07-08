@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "dirs",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-dialogs"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "futures-lite",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-image"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "image",
