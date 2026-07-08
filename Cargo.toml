@@ -12,4 +12,4 @@ repository = "https://github.com/mlm-games/rlobkit"
 homepage = "https://github.com/mlm-games/rlobkit"
 
 [workspace.dependencies]
-rlobkit-core = { version = "0.2.1", path = "rlobkit-core" }
+rlobkit-core = { version = "0.2.3", path = "rlobkit-core" }

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 fn block_on_runtime<T>(future: impl std::future::Future<Output = T>) -> T {
-    pollster::block_on(future)
+    futures_lite::future::block_on(future)
 }
 
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]

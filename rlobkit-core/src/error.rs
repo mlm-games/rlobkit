@@ -16,4 +16,7 @@ pub enum RlobKitError {
 
     #[error("Image error: {0}")]
     Image(String),
+
+    #[error("Android JNI error: {0}")]
+    AndroidJni(String),
 }

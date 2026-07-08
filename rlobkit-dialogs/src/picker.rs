@@ -27,31 +27,99 @@ pub struct OpenDirectoryOptions {
     pub initial_directory: Option<PathBuf>,
 }
 
+trait PlatformBackend {
+    async fn open_file_picker(opts: OpenFileOptions) -> Result<Option<Vec<PlatformFile>>, RlobKitError>;
+    async fn open_directory_picker(opts: OpenDirectoryOptions) -> Result<Option<PlatformDirectory>, RlobKitError>;
+    async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError>;
+    fn write_file_from_path(target: &PlatformFile, source: &Path) -> Result<(), RlobKitError>;
+    fn read_file_to_path(source: &PlatformFile, dest: &Path) -> Result<(), RlobKitError>;
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+struct Backend;
+
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+impl PlatformBackend for Backend {
+    async fn open_file_picker(opts: OpenFileOptions) -> Result<Option<Vec<PlatformFile>>, RlobKitError> {
+        crate::desktop::open_file_picker(opts).await
+    }
+
+    async fn open_directory_picker(opts: OpenDirectoryOptions) -> Result<Option<PlatformDirectory>, RlobKitError> {
+        crate::desktop::open_directory_picker(opts).await
+    }
+
+    async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
+        crate::desktop::open_file_saver(opts).await
+    }
+
+    fn write_file_from_path(target: &PlatformFile, source: &Path) -> Result<(), RlobKitError> {
+        crate::desktop::write_file_from_path(target, source)
+    }
+
+    fn read_file_to_path(source: &PlatformFile, dest: &Path) -> Result<(), RlobKitError> {
+        crate::desktop::read_file_to_path(source, dest)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct Backend;
+
+#[cfg(target_arch = "wasm32")]
+impl PlatformBackend for Backend {
+    async fn open_file_picker(opts: OpenFileOptions) -> Result<Option<Vec<PlatformFile>>, RlobKitError> {
+        crate::wasm::open_file_picker(opts).await
+    }
+
+    async fn open_directory_picker(_opts: OpenDirectoryOptions) -> Result<Option<PlatformDirectory>, RlobKitError> {
+        Err(RlobKitError::UnsupportedOperation("Directory picker not supported on WASM".into()))
+    }
+
+    async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
+        crate::wasm::open_file_saver(opts).await
+    }
+
+    fn write_file_from_path(_target: &PlatformFile, _source: &Path) -> Result<(), RlobKitError> {
+        Err(RlobKitError::UnsupportedOperation("Filesystem copy is not supported on WASM".into()))
+    }
+
+    fn read_file_to_path(_source: &PlatformFile, _dest: &Path) -> Result<(), RlobKitError> {
+        Err(RlobKitError::UnsupportedOperation("Filesystem copy is not supported on WASM".into()))
+    }
+}
+
+#[cfg(target_os = "android")]
+struct Backend;
+
+#[cfg(target_os = "android")]
+impl PlatformBackend for Backend {
+    async fn open_file_picker(opts: OpenFileOptions) -> Result<Option<Vec<PlatformFile>>, RlobKitError> {
+        crate::android::open_file_picker(opts).await
+    }
+
+    async fn open_directory_picker(opts: OpenDirectoryOptions) -> Result<Option<PlatformDirectory>, RlobKitError> {
+        crate::android::open_directory_picker(opts).await
+    }
+
+    async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {
+        crate::android::open_file_saver(opts).await
+    }
+
+    fn write_file_from_path(target: &PlatformFile, source: &Path) -> Result<(), RlobKitError> {
+        crate::android::write_file_from_path(target, source)
+    }
+
+    fn read_file_to_path(source: &PlatformFile, dest: &Path) -> Result<(), RlobKitError> {
+        crate::android::read_file_to_path(source, dest)
+    }
+}
+
 pub struct RlobKit;
 
 impl RlobKit {
     pub async fn open_file_picker(
         opts: OpenFileOptions,
     ) -> Result<Option<Vec<PlatformFile>>, RlobKitError> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-        {
-            return crate::desktop::open_file_picker(opts).await;
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            return crate::wasm::open_file_picker(opts).await;
-        }
-
-        #[cfg(target_os = "android")]
-        {
-            return crate::android::open_file_picker(opts).await;
-        }
-
-        #[allow(unreachable_code)]
-        Err(RlobKitError::UnsupportedOperation(
-            "Unsupported platform".into(),
-        ))
+        Backend::open_file_picker(opts).await
     }
 
     pub async fn open_single_file(
@@ -69,98 +137,24 @@ impl RlobKit {
     pub async fn open_directory_picker(
         opts: OpenDirectoryOptions,
     ) -> Result<Option<PlatformDirectory>, RlobKitError> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-        {
-            return crate::desktop::open_directory_picker(opts).await;
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            return Err(RlobKitError::UnsupportedOperation(
-                "Directory picker not supported on WASM".into(),
-            ));
-        }
-
-        #[cfg(target_os = "android")]
-        {
-            return crate::android::open_directory_picker(opts).await;
-        }
-
-        #[allow(unreachable_code)]
-        Err(RlobKitError::UnsupportedOperation(
-            "Unsupported platform".into(),
-        ))
+        Backend::open_directory_picker(opts).await
     }
 
     pub async fn open_file_saver(
         opts: SaveFileOptions,
     ) -> Result<Option<PlatformFile>, RlobKitError> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-        {
-            return crate::desktop::open_file_saver(opts).await;
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            return crate::wasm::open_file_saver(opts).await;
-        }
-
-        #[cfg(target_os = "android")]
-        {
-            return crate::android::open_file_saver(opts).await;
-        }
-
-        #[allow(unreachable_code)]
-        Err(RlobKitError::UnsupportedOperation(
-            "Unsupported platform".into(),
-        ))
+        Backend::open_file_saver(opts).await
     }
 
     pub fn write_file_from_path(
         target: &PlatformFile,
         source_path: &Path,
     ) -> Result<(), RlobKitError> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-        {
-            return crate::desktop::write_file_from_path(target, source_path);
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            return crate::wasm::write_file_from_path(target, source_path);
-        }
-
-        #[cfg(target_os = "android")]
-        {
-            return crate::android::write_file_from_path(target, source_path);
-        }
-
-        #[allow(unreachable_code)]
-        Err(RlobKitError::UnsupportedOperation(
-            "Unsupported platform".into(),
-        ))
+        Backend::write_file_from_path(target, source_path)
     }
 
     pub fn read_file_to_path(source: &PlatformFile, dest_path: &Path) -> Result<(), RlobKitError> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-        {
-            return crate::desktop::read_file_to_path(source, dest_path);
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            return crate::wasm::read_file_to_path(source, dest_path);
-        }
-
-        #[cfg(target_os = "android")]
-        {
-            return crate::android::read_file_to_path(source, dest_path);
-        }
-
-        #[allow(unreachable_code)]
-        Err(RlobKitError::UnsupportedOperation(
-            "Unsupported platform".into(),
-        ))
+        Backend::read_file_to_path(source, dest_path)
     }
 
     pub async fn save_bytes(

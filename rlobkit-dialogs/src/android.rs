@@ -118,7 +118,7 @@ pub fn take_writable_fd_for_uri(uri: &str) -> Option<i32> {
 }
 
 fn map_jni_error(error: JniError) -> RlobKitError {
-    RlobKitError::UnsupportedOperation(format!("Android JNI error: {error}"))
+    RlobKitError::AndroidJni(format!("{error}"))
 }
 
 fn with_android_env<T>(
@@ -1630,11 +1630,7 @@ pub extern "system" fn Java_rust_rlobkit_RlobKitPickerActivity_nativeOnActivityR
 ) {
     let _ = env.with_env(|env| -> jni::errors::Result<()> {
         on_activity_result_from_intent(env, request_code, result_code, data).map_err(|error| {
-            JniError::MethodNotFound {
-                name: "nativeOnActivityResult".into(),
-                sig: error.to_string(),
-            }
-            .into()
+            JniError::JavaException
         })
     });
 }

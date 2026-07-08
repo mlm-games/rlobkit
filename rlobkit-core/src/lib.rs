@@ -207,6 +207,67 @@ impl PlatformFile {
     pub fn write_string(&self, s: &str) -> Result<(), RlobKitError> {
         self.write_bytes(s.as_bytes())
     }
+
+    pub fn builder(name: impl Into<String>) -> PlatformFileBuilder {
+        PlatformFileBuilder {
+            name: name.into(),
+            path: None,
+            uri: None,
+            data: None,
+            size: None,
+            mime_type: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PlatformFileBuilder {
+    name: String,
+    path: Option<PathBuf>,
+    uri: Option<String>,
+    data: Option<Bytes>,
+    size: Option<u64>,
+    mime_type: Option<String>,
+}
+
+impl PlatformFileBuilder {
+    pub fn path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn uri(mut self, uri: impl Into<String>) -> Self {
+        self.uri = Some(uri.into());
+        self
+    }
+
+    pub fn data(mut self, data: Bytes) -> Self {
+        let size = Some(data.len() as u64);
+        self.data = Some(data);
+        self.size = size;
+        self
+    }
+
+    pub fn size(mut self, size: u64) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    pub fn mime_type(mut self, mime: impl Into<String>) -> Self {
+        self.mime_type = Some(mime.into());
+        self
+    }
+
+    pub fn build(self) -> PlatformFile {
+        PlatformFile {
+            name: self.name,
+            path: self.path,
+            uri: self.uri,
+            data: self.data,
+            size: self.size,
+            mime_type: self.mime_type,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
