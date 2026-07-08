@@ -3,6 +3,7 @@ use crate::picker::{OpenFileOptions, SaveFileOptions};
 use bytes::Bytes;
 use rfd::AsyncFileDialog;
 use rlobkit_core::{PlatformFile, RlobKitError};
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 pub async fn open_file_picker(
@@ -30,11 +31,10 @@ pub async fn open_file_picker(
         RlobKitMode::Multiple { limit } => match dialog.pick_files().await {
             Some(handles) => {
                 let mut files = Vec::new();
+                let limit = limit.map(NonZeroUsize::get);
                 for handle in handles {
-                    if let Some(l) = limit {
-                        if files.len() >= l {
-                            break;
-                        }
+                    if let Some(l) = limit && files.len() >= l {
+                        break;
                     }
                     let name = handle.file_name().to_string();
                     let data = Bytes::from(handle.read().await);

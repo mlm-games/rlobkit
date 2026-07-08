@@ -3,6 +3,7 @@ use crate::{RlobKitMode, types::RlobKitType};
 use rfd::AsyncFileDialog;
 use rlobkit_core::{PlatformDirectory, PlatformFile, RlobKitError};
 use std::io;
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 pub async fn open_file_picker(
@@ -38,11 +39,10 @@ pub async fn open_file_picker(
             let files = dialog.pick_files().await;
             if let Some(files) = files {
                 let mut result = Vec::new();
+                let limit = limit.map(NonZeroUsize::get);
                 for f in files {
-                    if let Some(l) = limit {
-                        if result.len() >= l {
-                            break;
-                        }
+                    if let Some(l) = limit && result.len() >= l {
+                        break;
                     }
                     let path = f.path().to_path_buf();
                     let name = f.file_name();

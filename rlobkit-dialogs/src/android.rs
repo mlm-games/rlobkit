@@ -623,39 +623,26 @@ fn resolve_display_name(uri_str: &str) -> Option<String> {
             return Ok(None);
         }
 
-        let moved = env
-            .call_method(&cursor, jni_str!("moveToFirst"), jni_sig!("()Z"), &[])?
-            .z()?;
+        let result = (|| -> Result<Option<String>, JniError> {
+            if !env.call_method(&cursor, jni_str!("moveToFirst"), jni_sig!("()Z"), &[])?.z()? {
+                return Ok(None);
+            }
 
-        if !moved {
-            let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
-            return Ok(None);
-        }
+            let name_col2 = JString::new(env, "_display_name")?;
+            let col_idx = env.call_method(&cursor, jni_str!("getColumnIndexOrThrow"), jni_sig!("(Ljava/lang/String;)I"), &[JValue::Object(&name_col2.into())])?.i()?;
 
-        let name_col2 = JString::new(env, "_display_name")?;
-        let col_idx = env
-            .call_method(
-                &cursor,
-                jni_str!("getColumnIndexOrThrow"),
-                jni_sig!("(Ljava/lang/String;)I"),
-                &[JValue::Object(&name_col2.into())],
-            )?
-            .i()?;
+            let name_obj = env.call_method(&cursor, jni_str!("getString"), jni_sig!("(I)Ljava/lang/String;"), &[JValue::Int(col_idx)])?.l()?;
 
-        let name_obj = env
-            .call_method(&cursor, jni_str!("getString"), jni_sig!("(I)Ljava/lang/String;"), &[JValue::Int(col_idx)])?
-            .l()?;
+            if name_obj.is_null() {
+                return Ok(None);
+            }
+
+            let name = JString::cast_local(env, name_obj)?.try_to_string(env)?;
+            Ok(Some(name))
+        })();
 
         let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
-
-        if name_obj.is_null() {
-            return Ok(None);
-        }
-
-        let name = JString::cast_local(env, name_obj)?
-            .try_to_string(env)?;
-
-        Ok(Some(name))
+        result
     })
     .ok()
     .flatten()
@@ -708,38 +695,26 @@ fn resolve_size(uri_str: &str) -> Option<u64> {
             return Ok(None);
         }
 
-        let moved = env
-            .call_method(&cursor, jni_str!("moveToFirst"), jni_sig!("()Z"), &[])?
-            .z()?;
+        let result = (|| -> Result<Option<u64>, JniError> {
+            if !env.call_method(&cursor, jni_str!("moveToFirst"), jni_sig!("()Z"), &[])?.z()? {
+                return Ok(None);
+            }
 
-        if !moved {
-            let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
-            return Ok(None);
-        }
+            let size_col2 = JString::new(env, "_size")?;
+            let col_idx = env.call_method(&cursor, jni_str!("getColumnIndexOrThrow"), jni_sig!("(Ljava/lang/String;)I"), &[JValue::Object(&size_col2.into())])?.i()?;
 
-        let size_col2 = JString::new(env, "_size")?;
-        let col_idx = env
-            .call_method(
-                &cursor,
-                jni_str!("getColumnIndexOrThrow"),
-                jni_sig!("(Ljava/lang/String;)I"),
-                &[JValue::Object(&size_col2.into())],
-            )?
-            .i()?;
+            let size_obj = env.call_method(&cursor, jni_str!("getString"), jni_sig!("(I)Ljava/lang/String;"), &[JValue::Int(col_idx)])?.l()?;
 
-        let size_obj = env
-            .call_method(&cursor, jni_str!("getString"), jni_sig!("(I)Ljava/lang/String;"), &[JValue::Int(col_idx)])?
-            .l()?;
+            if size_obj.is_null() {
+                return Ok(None);
+            }
+
+            let size_str = JString::cast_local(env, size_obj)?.try_to_string(env)?;
+            Ok(size_str.parse::<u64>().ok())
+        })();
 
         let _ = env.call_method(&cursor, jni_str!("close"), jni_sig!("()V"), &[]);
-
-        if size_obj.is_null() {
-            return Ok(None);
-        }
-
-        let size_str = JString::cast_local(env, size_obj)?
-            .try_to_string(env)?;
-        Ok(size_str.parse::<u64>().ok())
+        result
     })
     .ok()
     .flatten()
@@ -1304,7 +1279,7 @@ pub async fn open_file_picker(
     let grant_flags = result.grant_flags;
     let mut uris = uris_from_result(result, allow_multiple);
     if let RlobKitMode::Multiple { limit: Some(limit) } = opts.mode {
-        uris.truncate(limit);
+        uris.truncate(limit.get());
     }
 
     if uris.is_empty() {
@@ -1397,8 +1372,12 @@ pub async fn open_directory_picker(
         );
     }
 
-    let path = resolve_saf_tree_to_path(&uri).unwrap_or_else(|| PathBuf::from(&uri));
-    Ok(Some(PlatformDirectory::new(path)))
+    let dir = if let Some(path) = resolve_saf_tree_to_path(&uri) {
+        PlatformDirectory::new(path)
+    } else {
+        PlatformDirectory::from_uri(&uri)
+    };
+    Ok(Some(dir))
 }
 
 pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFile>, RlobKitError> {

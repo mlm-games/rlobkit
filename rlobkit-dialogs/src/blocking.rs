@@ -96,7 +96,7 @@ pub fn blocking_pick_directory(title: &str) -> Option<PathBuf> {
         })
         .await;
         match result {
-            Ok(Some(dir)) => Some(dir.path().to_path_buf()),
+            Ok(Some(dir)) => dir.path().map(|p| p.to_path_buf()),
             _ => None,
         }
     })

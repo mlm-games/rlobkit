@@ -16,4 +16,3 @@ image = { version = "0.25", default-features = false, features = [
     "webp",
 ] }
 bytes = "1"
-thiserror = "2"
