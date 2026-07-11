@@ -1,0 +1,23 @@
+[package]
+name = "rlobkit-app-events"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+log = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies.jni]
+version = "0.22"
+optional = true
+
+[package.metadata.android.cargo_rapk]
+java_sources = "android"
+
+[features]
+default = []
+jni-bridge = ["jni"]
