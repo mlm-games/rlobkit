@@ -15,6 +15,12 @@ bytes = "1"
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", target_arch = "wasm32"))'.dependencies]
 rfd = "0.17"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Blob", "Url", "HtmlAnchorElement", "Document", "Window", "Element", "HtmlElement", "Node"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures-lite = "2"
 

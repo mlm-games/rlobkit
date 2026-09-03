@@ -15,6 +15,16 @@ license = "MIT"
 description = "Partially cross-platform file-picking toolkit"
 repository = "https://github.com/mlm-games/rlobkit"
 homepage = "https://github.com/mlm-games/rlobkit"
+rust-version = "1.85"
 
 [workspace.dependencies]
-rlobkit-core = { version = "^0", path = "rlobkit-core" }
+rlobkit-core = { path = "rlobkit-core", version = "0.5.1" }
+rlobkit-dialogs = { path = "rlobkit-dialogs", version = "0.5.1" }
+rlobkit-image = { path = "rlobkit-image", version = "0.5.1" }
+rlobkit-app-events = { path = "rlobkit-app-events", version = "0.5.1" }
+
+# [patch.crates-io]
+# rlobkit-core = { path = "../rlobkit/rlobkit-core" }
+
+[profile.release]
+lto = "thin"

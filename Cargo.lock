@@ -664,11 +664,15 @@ dependencies = [
  "futures-lite",
  "jni",
  "jni-min-helper",
+ "js-sys",
  "log",
  "mime_guess",
  "ndk-context",
  "rfd",
  "rlobkit-core",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
