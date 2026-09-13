@@ -6,7 +6,6 @@ use rlobkit_core::{PlatformFile, RlobKitError};
 use std::num::NonZeroUsize;
 use std::path::Path;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
 
 pub async fn open_file_picker(
     opts: OpenFileOptions,
@@ -71,19 +70,19 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         })?;
         let array = js_sys::Array::new();
 
-        // should be safe since it will be sync. always
-        let uint8arr = unsafe { js_sys::Uint8Array::view(&data) };
-        array.push(&uint8arr.buffer());
-        let blob = web_sys::Blob::new_with_u8_array_sequence(&array).map_err(|_| {
+        let uint8arr = js_sys::Uint8Array::new_with_length(data.len() as u32);
+        uint8arr.copy_from(&data);
+        array.push(&uint8arr);
+        let blob = web_sys::Blob::new_with_u8_array_sequence(&array).map_err(|e| {
             RlobKitError::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "blob creation failed",
+                format!("blob creation failed: {e:?}"),
             ))
         })?;
-        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|_| {
+        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|e| {
             RlobKitError::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "create_object_url failed",
+                format!("create_object_url failed: {e:?}"),
             ))
         })?;
         let body = document.body().ok_or_else(|| {
@@ -116,12 +115,17 @@ pub async fn open_file_saver(opts: SaveFileOptions) -> Result<Option<PlatformFil
         anchor.click();
 
         let url_clone = url.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            JsFuture::from(js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL))
-                .await
-                .ok();
+        let revoke = wasm_bindgen::closure::Closure::once_into_js(move || {
             web_sys::Url::revoke_object_url(&url_clone).ok();
         });
+        if let Some(window) = web_sys::window() {
+            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                revoke.as_ref().unchecked_ref(),
+                60_000,
+            );
+        } else {
+            web_sys::Url::revoke_object_url(&url).ok();
+        }
 
         anchor.remove();
         return Ok(Some(PlatformFile::from_blob(name, Bytes::new(), None)));
