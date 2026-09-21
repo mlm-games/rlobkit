@@ -35,10 +35,22 @@ object RlobKitIntentBridge {
 
         @Suppress("DEPRECATION")
         val mimeType = intent.type
-        Log.i(TAG, "captureViewIntent uri=$uri mime=$mimeType")
+        val displayName = queryDisplayName(uri, resolver)
+        Log.i(TAG, "captureViewIntent uri=$uri mime=$mimeType name=$displayName")
 
         val bytes = readUriBytes(uri, resolver) ?: return
-        savePendingIntent(bytes, filesDir)
+        savePendingIntent(bytes, filesDir, displayName)
+    }
+
+    private fun queryDisplayName(uri: Uri, resolver: ContentResolver): String? {
+        return try {
+            resolver.query(uri, arrayOf("_display_name"), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: uri.lastPathSegment
+        } catch (e: Exception) {
+            Log.w(TAG, "queryDisplayName failed: ${e.message}")
+            uri.lastPathSegment
+        }
     }
 
     private fun readUriBytes(uri: Uri, resolver: ContentResolver): ByteArray? {
@@ -52,7 +64,7 @@ object RlobKitIntentBridge {
         }
     }
 
-    private fun savePendingIntent(data: ByteArray, filesDir: File) {
+    private fun savePendingIntent(data: ByteArray, filesDir: File, displayName: String? = null) {
         try {
             val tmp = File(filesDir, "${PENDING_FILE}.tmp")
             val dst = File(filesDir, PENDING_FILE)
@@ -60,7 +72,10 @@ object RlobKitIntentBridge {
             if (!tmp.renameTo(dst)) {
                 throw java.io.IOException("rename failed")
             }
-            Log.i(TAG, "savePendingIntent: saved ${data.size} bytes")
+            if (!displayName.isNullOrEmpty()) {
+                File(filesDir, "$PENDING_FILE.name").writeText(displayName)
+            }
+            Log.i(TAG, "savePendingIntent: saved ${data.size} bytes name=$displayName")
         } catch (e: Exception) {
             Log.e(TAG, "savePendingIntent failed: ${e.message}", e)
         }

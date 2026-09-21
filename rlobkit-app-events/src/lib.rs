@@ -55,6 +55,7 @@ pub struct AppIntent {
 }
 
 const PENDING_FILE: &str = "pending_intent";
+const PENDING_NAME_FILE: &str = "pending_intent.name";
 
 /// Read and remove the `pending_intent` file saved by the Kotlin bridge.
 ///
@@ -68,15 +69,50 @@ pub fn take_pending_intent(data_dir: &Path) -> Option<AppIntent> {
     if data.is_empty() {
         return None;
     }
+    // Best-effort display name persisted alongside the bytes by the bridge.
+    // Falls back to content sniffing (mp4 magic) and finally a generic label.
+    let name_path = data_dir.join(PENDING_NAME_FILE);
+    let name = std::fs::read_to_string(&name_path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| sniff_name(&data));
+    let _ = std::fs::remove_file(&name_path);
+    let name = name.unwrap_or_else(|| "Shared file".into());
     #[cfg(target_os = "android")]
     log::info!(
-        "rlobkit_app_events: took pending intent ({} bytes)",
+        "rlobkit_app_events: took pending intent ({} bytes, name={name})",
         data.len()
     );
-    Some(AppIntent {
-        name: "Shared file".into(),
-        data,
-    })
+    Some(AppIntent { name, data })
+}
+
+/// Guess a filename (extension only matters) from magic bytes so downstream
+/// format probing gets the right hint even when the URI gave no name.
+fn sniff_name(data: &[u8]) -> Option<String> {
+    if data.len() >= 12 && &data[4..8] == b"ftyp" {
+        let brand = &data[8..12.min(data.len())];
+        let ext = match brand {
+            b"isom" | b"mp41" | b"mp42" => "mp4",
+            b"M4V " | b"mmp4" => "m4v",
+            b"M4A " => "m4a",
+            _ => "mp4",
+        };
+        return Some(format!("Shared file.{ext}"));
+    }
+    if data.len() >= 4 && &data[..4] == b"ID3 " || data.len() >= 2 && &data[..2] == b"\xff\xfb" {
+        return Some("Shared file.mp3".into());
+    }
+    if data.len() >= 4 && &data[..4] == b"OggS" {
+        return Some("Shared file.ogg".into());
+    }
+    if data.len() >= 4 && &data[..4] == b"fLaC" {
+        return Some("Shared file.flac".into());
+    }
+    if data.len() >= 4 && &data[..4] == b"RIFF" {
+        return Some("Shared file.wav".into());
+    }
+    None
 }
 
 use std::sync::Mutex;
