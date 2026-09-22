@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-app-events"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "jni",
  "log",
@@ -724,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-core"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "bytes",
  "dirs",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-dialogs"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "bytes",
  "futures-lite",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "rlobkit-image"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "bytes",
  "image",
