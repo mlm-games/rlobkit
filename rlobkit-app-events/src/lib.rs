@@ -43,7 +43,7 @@ pub mod insets;
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub mod jni;
 
-#[cfg(all(target_os = "android", feature = "android-log"))]
+#[cfg(target_os = "android")]
 pub mod android_log;
 
 use std::path::Path;

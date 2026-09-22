@@ -21,13 +21,12 @@ java_sources = "android"
 [features]
 default = []
 jni-bridge = ["jni"]
-android-log = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-log", "dep:paranoid-android"]
 
 [target.'cfg(target_os = "android")'.dependencies]
-tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
-], optional = true }
-tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"], optional = true }
-paranoid-android = { version = "0.2", default-features = false, optional = true }
+] }
+tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
+paranoid-android = { version = "0.2", default-features = false }
