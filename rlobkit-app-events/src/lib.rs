@@ -43,6 +43,9 @@ pub mod insets;
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub mod jni;
 
+#[cfg(all(target_os = "android", feature = "android-log"))]
+pub mod android_log;
+
 use std::path::Path;
 
 /// An incoming `ACTION_VIEW` intent.
