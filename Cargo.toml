@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.5.6"
+version = "0.5.7"
 edition = "2024"
 authors = ["mlm-games"]
 license = "MIT"
@@ -18,10 +18,10 @@ homepage = "https://github.com/mlm-games/rlobkit"
 rust-version = "1.85"
 
 [workspace.dependencies]
-rlobkit-core = { path = "rlobkit-core", version = "0.5.6" }
-rlobkit-dialogs = { path = "rlobkit-dialogs", version = "0.5.6" }
-rlobkit-image = { path = "rlobkit-image", version = "0.5.6" }
-rlobkit-app-events = { path = "rlobkit-app-events", version = "0.5.6" }
+rlobkit-core = { path = "rlobkit-core", version = "0.5.7" }
+rlobkit-dialogs = { path = "rlobkit-dialogs", version = "0.5.7" }
+rlobkit-image = { path = "rlobkit-image", version = "0.5.7" }
+rlobkit-app-events = { path = "rlobkit-app-events", version = "0.5.7" }
 
 # [patch.crates-io]
 # rlobkit-core = { path = "../rlobkit/rlobkit-core" }
