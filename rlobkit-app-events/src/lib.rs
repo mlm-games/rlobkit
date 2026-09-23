@@ -1,4 +1,4 @@
-//! Shared Android intent capture, window insets, and the shared
+//! Shared Android intent capture, window insets, system bars, and the shared
 //! `RlobKitMainActivity` (Kotlin).
 //!
 //! ## Intents
@@ -22,6 +22,15 @@
 //! call [`insets::set_on_insets`] during init to forward the values into
 //! their own layout system.
 //!
+//! ## System bars
+//!
+//! `RlobKitMainActivity` boots edge-to-edge with system bars visible
+//! (matching `enableEdgeToEdge()` semantics).  Full-screen apps opt in
+//! via [`system_bars::set_immersive_sticky`]\(true\) once from
+//! `android_main`. [`system_bars::set_system_bars_visible`] toggles at runtime,
+//! both require the `jni-bridge` feature on Android and are no-ops
+//! elsewhere.
+//!
 //! ## Example
 //!
 //! ```ignore
@@ -39,6 +48,7 @@
 //! ```
 
 pub mod insets;
+pub mod system_bars;
 
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub mod jni;

@@ -7,7 +7,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
 
 /**
  * Shared NativeActivity subclass used by all rlobkit-based apps.
@@ -24,14 +27,34 @@ import android.view.WindowInsets
  *   launch_mode = "singleTask"
  */
 class RlobKitMainActivity : NativeActivity() {
+    private var immersiveSticky: Boolean = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         RlobKitIntentBridge.captureViewIntent(intent, contentResolver, filesDir)
         super.onCreate(savedInstanceState)
-        // NativeActivity loads the .so via dlopen internally, but that does
-        // NOT register JNI functions.  We need System.loadLibrary so the VM
-        // can resolve our nativeOnWindowInsets JNI symbol.
         loadLibraryForJni()
         setupWindowInsetsListener()
+        applySystemBars()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applySystemBars()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applySystemBars()
+    }
+
+    fun setImmersiveSticky(hide: Boolean) {
+        immersiveSticky = hide
+        runOnUiThread { applySystemBars() }
+    }
+
+    fun setSystemBarsVisible(visible: Boolean) {
+        immersiveSticky = !visible
+        runOnUiThread { applySystemBars() }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -53,9 +76,38 @@ class RlobKitMainActivity : NativeActivity() {
         }
     }
 
+    private fun applySystemBars() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(!immersiveSticky)
+            if (immersiveSticky && Build.VERSION.SDK_INT >= 28) {
+                window.attributes.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            val controller = window.insetsController ?: return
+            if (immersiveSticky) {
+                controller.hide(WindowInsets.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                controller.show(WindowInsets.Type.systemBars())
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = if (immersiveSticky) {
+                (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+            } else {
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
+        }
+    }
+
     private fun setupWindowInsetsListener() {
         if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
             window.decorView.setOnApplyWindowInsetsListener { view, insets ->
                 val systemBars = insets.getInsets(WindowInsets.Type.systemBars())
                 val ime = insets.getInsets(WindowInsets.Type.ime())
