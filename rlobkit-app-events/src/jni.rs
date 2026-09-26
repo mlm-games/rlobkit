@@ -4,9 +4,20 @@
 //! be linked into any app that uses that Activity class.
 
 use crate::insets::{WindowInsets, set_window_insets};
+use crate::system_bars;
 use jni::objects::JByteArray;
-use jni::sys::{jbyteArray, jfloat, jobject};
+use jni::sys::{jboolean, jbyteArray, jfloat, jobject};
 use jni::{EnvUnowned, errors::ThrowRuntimeExAndDefault};
+
+/// Called by `RlobKitMainActivity` to read the system-bar state Rust wants,
+/// so a request posted before `onCreate` published the Activity still applies.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeImmersiveSticky(
+    _env: EnvUnowned,
+    _this: jobject,
+) -> jboolean {
+    system_bars::is_immersive()
+}
 
 /// Called by `RlobKitMainActivity`'s `OnApplyWindowInsetsListener`.
 #[unsafe(no_mangle)]
@@ -38,7 +49,11 @@ pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeOnWindowInset
 ///
 /// If declared, the symbol must exist or the Activity class won't load.
 /// To avoid that, the shared Activity calls it via reflection when present.
-pub fn default_native_on_new_intent(env: &mut jni::EnvUnowned, data: jbyteArray) {
+///
+/// # Safety
+/// `data` must be the `byte[]` local reference the JNI frame passed in, and
+/// must stay valid for the duration of that frame.
+pub unsafe fn default_native_on_new_intent(env: &mut jni::EnvUnowned, data: jbyteArray) {
     env.with_env(|env| {
         let array = unsafe { JByteArray::from_raw(env, data) };
         let bytes = env.convert_byte_array(&array)?;

@@ -11,6 +11,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import java.lang.ref.WeakReference
 
 /**
  * Shared NativeActivity subclass used by all rlobkit-based apps.
@@ -18,6 +19,7 @@ import android.view.WindowManager
  * Handles:
  * - ACTION_VIEW intents (writes to pending_intent file)
  * - Window insets / IME (calls nativeOnWindowInsets via JNI)
+ * - System bars, on request from the native side (postImmersiveSticky)
  *
  * Reference this activity in your Cargo.toml:
  *
@@ -32,7 +34,9 @@ class RlobKitMainActivity : NativeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         RlobKitIntentBridge.captureViewIntent(intent, contentResolver, filesDir)
         super.onCreate(savedInstanceState)
+        current = WeakReference(this)
         loadLibraryForJni()
+        immersiveSticky = nativeImmersiveStickyOrFalse()
         setupWindowInsetsListener()
         applySystemBars()
     }
@@ -40,6 +44,11 @@ class RlobKitMainActivity : NativeActivity() {
     override fun onResume() {
         super.onResume()
         applySystemBars()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (current?.get() === this) current = null
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -53,8 +62,7 @@ class RlobKitMainActivity : NativeActivity() {
     }
 
     fun setSystemBarsVisible(visible: Boolean) {
-        immersiveSticky = !visible
-        runOnUiThread { applySystemBars() }
+        setImmersiveSticky(!visible)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -141,7 +149,26 @@ class RlobKitMainActivity : NativeActivity() {
         imeBottomPx: Float,
     )
 
+    external fun nativeImmersiveSticky(): Boolean
+
+    private fun nativeImmersiveStickyOrFalse(): Boolean =
+        try {
+            nativeImmersiveSticky()
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        }
+
     companion object {
         private const val TAG = "RlobKitMainActivity"
+
+        @Volatile
+        private var current: WeakReference<RlobKitMainActivity>? = null
+
+        /** Entry point for `rlobkit_app_events::system_bars`, callable from any thread. */
+        @JvmStatic
+        fun postImmersiveSticky(hide: Boolean) {
+            val activity = current?.get() ?: return
+            activity.runOnUiThread { activity.setImmersiveSticky(hide) }
+        }
     }
 }

@@ -29,7 +29,8 @@
 //! via [`system_bars::set_immersive_sticky`]\(true\) once from
 //! `android_main`. [`system_bars::set_system_bars_visible`] toggles at runtime,
 //! both require the `jni-bridge` feature on Android and are no-ops
-//! elsewhere.
+//! elsewhere.  The running `RlobKitMainActivity` applies the request, so a host
+//! shipping its own Activity subclass needs its own entry point.
 //!
 //! ## Example
 //!

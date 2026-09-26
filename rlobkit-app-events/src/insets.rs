@@ -26,10 +26,8 @@ static LAST_INSETS: std::sync::Mutex<Option<WindowInsets>> = std::sync::Mutex::n
 /// `Send + Sync` and should forward to the UI thread / layout system.
 pub fn set_on_insets(cb: Box<dyn Fn(WindowInsets) + Send + Sync>) {
     // Forward the most recent value so the subscriber catches up.
-    if let Ok(guard) = LAST_INSETS.lock() {
-        if let Some(insets) = *guard {
-            cb(insets);
-        }
+    if let Some(insets) = LAST_INSETS.lock().ok().and_then(|guard| *guard) {
+        cb(insets);
     }
     let _ = INSETS_CB.set(cb);
 }

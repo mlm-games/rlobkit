@@ -1051,7 +1051,7 @@ fn open_readable_fd_for_uri(env: &mut Env<'_>, uri: &str) -> Result<i32, JniErro
         .i()
         .map_err(|e| annotate_jni_error(env, "read.detachFd.as_i", e))?;
 
-    let _ = env.delete_local_ref(pfd);
+    env.delete_local_ref(pfd);
     Ok(fd)
 }
 
@@ -1212,7 +1212,7 @@ fn write_bytes_to_output_stream(
             &[JValue::Object(&jarr_obj)],
         )
         .map_err(|e| annotate_jni_error(env, "write.OutputStream.write", e))?;
-        let _ = env.delete_local_ref(jarr_obj);
+        env.delete_local_ref(jarr_obj);
         offset += chunk_len;
     }
     Ok(())
@@ -1608,7 +1608,7 @@ pub extern "system" fn Java_rust_rlobkit_RlobKitPickerActivity_nativeOnActivityR
     data: JObject<'_>,
 ) {
     let _ = env.with_env(|env| -> jni::errors::Result<()> {
-        on_activity_result_from_intent(env, request_code, result_code, data).map_err(|error| {
+        on_activity_result_from_intent(env, request_code, result_code, data).map_err(|_error| {
             JniError::JavaException
         })
     });
