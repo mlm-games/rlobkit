@@ -27,10 +27,13 @@
 //! `RlobKitMainActivity` boots edge-to-edge with system bars visible
 //! (matching `enableEdgeToEdge()` semantics).  Full-screen apps opt in
 //! via [`system_bars::set_immersive_sticky`]\(true\) once from
-//! `android_main`. [`system_bars::set_system_bars_visible`] toggles at runtime,
-//! both require the `jni-bridge` feature on Android and are no-ops
-//! elsewhere.  The running `RlobKitMainActivity` applies the request, so a host
-//! shipping its own Activity subclass needs its own entry point.
+//! `android_main`. [`system_bars::set_system_bars_visible`] hides or shows
+//! either bar on its own, applies immediately, and so also toggles while the
+//! app runs. [`system_bars::set_bar_icons`] matches the icons in a visible bar
+//! to the app's background.  Both require the `jni-bridge` feature on Android
+//! and only record the state elsewhere.  The state lives in this module and
+//! the Activity reads it back, so a host shipping its own Activity subclass
+//! needs its own entry point.
 //!
 //! ## Example
 //!

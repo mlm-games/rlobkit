@@ -19,7 +19,7 @@ import java.lang.ref.WeakReference
  * Handles:
  * - ACTION_VIEW intents (writes to pending_intent file)
  * - Window insets / IME (calls nativeOnWindowInsets via JNI)
- * - System bars, on request from the native side (postImmersiveSticky)
+ * - System bars, re-applied on request from the native side (refreshSystemBars)
  *
  * Reference this activity in your Cargo.toml:
  *
@@ -29,14 +29,11 @@ import java.lang.ref.WeakReference
  *   launch_mode = "singleTask"
  */
 class RlobKitMainActivity : NativeActivity() {
-    private var immersiveSticky: Boolean = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
         RlobKitIntentBridge.captureViewIntent(intent, contentResolver, filesDir)
         super.onCreate(savedInstanceState)
         current = WeakReference(this)
         loadLibraryForJni()
-        immersiveSticky = nativeImmersiveStickyOrFalse()
         setupWindowInsetsListener()
         applySystemBars()
     }
@@ -54,15 +51,6 @@ class RlobKitMainActivity : NativeActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) applySystemBars()
-    }
-
-    fun setImmersiveSticky(hide: Boolean) {
-        immersiveSticky = hide
-        runOnUiThread { applySystemBars() }
-    }
-
-    fun setSystemBarsVisible(visible: Boolean) {
-        setImmersiveSticky(!visible)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -85,32 +73,53 @@ class RlobKitMainActivity : NativeActivity() {
     }
 
     private fun applySystemBars() {
+        val (statusVisible, navigationVisible, lightIcons) = nativeBarState()
+        val immersive = !statusVisible && !navigationVisible
         if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(!immersiveSticky)
-            if (immersiveSticky && Build.VERSION.SDK_INT >= 28) {
+            // Only a fully immersive window draws behind the bars; with one bar
+            // left showing, fitting the window keeps the visible bar's space
+            // reserved instead of moving the layout under it.
+            window.setDecorFitsSystemWindows(!immersive)
+            if (immersive && Build.VERSION.SDK_INT >= 28) {
                 window.attributes.layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
             val controller = window.insetsController ?: return
-            if (immersiveSticky) {
-                controller.hide(WindowInsets.Type.systemBars())
+            val hidden = (if (statusVisible) 0 else WindowInsets.Type.statusBars()) or
+                (if (navigationVisible) 0 else WindowInsets.Type.navigationBars())
+            if (hidden != 0) {
+                controller.hide(hidden)
                 controller.systemBarsBehavior =
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             } else {
                 controller.show(WindowInsets.Type.systemBars())
             }
+            val appearanceMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            controller.setSystemBarsAppearance(if (lightIcons) appearanceMask else 0, appearanceMask)
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = if (immersiveSticky) {
-                (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
-            } else {
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            }
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                (if (statusVisible) 0 else View.SYSTEM_UI_FLAG_FULLSCREEN) or
+                (if (navigationVisible) 0 else View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) or
+                (if (immersive) {
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                } else {
+                    0
+                }) or
+                (if (lightIcons) {
+                    0
+                } else {
+                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+                        (if (Build.VERSION.SDK_INT >= 26) {
+                            View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                        } else {
+                            0
+                        })
+                })
         }
     }
 
@@ -149,13 +158,25 @@ class RlobKitMainActivity : NativeActivity() {
         imeBottomPx: Float,
     )
 
-    external fun nativeImmersiveSticky(): Boolean
+    external fun nativeStatusBarVisible(): Boolean
 
-    private fun nativeImmersiveStickyOrFalse(): Boolean =
+    external fun nativeNavigationBarVisible(): Boolean
+
+    external fun nativeLightBarIcons(): Boolean
+
+    /**
+     * (statusVisible, navigationVisible, lightIcons), defaulting to both bars
+     * visible with light icons if the native library has no symbol.
+     */
+    private fun nativeBarState(): Triple<Boolean, Boolean, Boolean> =
         try {
-            nativeImmersiveSticky()
+            Triple(
+                nativeStatusBarVisible(),
+                nativeNavigationBarVisible(),
+                nativeLightBarIcons(),
+            )
         } catch (_: UnsatisfiedLinkError) {
-            false
+            Triple(true, true, true)
         }
 
     companion object {
@@ -164,11 +185,14 @@ class RlobKitMainActivity : NativeActivity() {
         @Volatile
         private var current: WeakReference<RlobKitMainActivity>? = null
 
-        /** Entry point for `rlobkit_app_events::system_bars`, callable from any thread. */
+        /**
+         * Re-applies the system-bar state the native side owns. Callable from
+         * any thread; the call itself does not change the state.
+         */
         @JvmStatic
-        fun postImmersiveSticky(hide: Boolean) {
+        fun refreshSystemBars() {
             val activity = current?.get() ?: return
-            activity.runOnUiThread { activity.setImmersiveSticky(hide) }
+            activity.runOnUiThread { activity.applySystemBars() }
         }
     }
 }

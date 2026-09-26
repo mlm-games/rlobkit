@@ -9,14 +9,30 @@ use jni::objects::JByteArray;
 use jni::sys::{jboolean, jbyteArray, jfloat, jobject};
 use jni::{EnvUnowned, errors::ThrowRuntimeExAndDefault};
 
-/// Called by `RlobKitMainActivity` to read the system-bar state Rust wants,
-/// so a request posted before `onCreate` published the Activity still applies.
+/// Called by `RlobKitMainActivity` when it applies the system-bar state, which
+/// the native side owns so a toggle made before the Activity existed survives.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeImmersiveSticky(
+pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeStatusBarVisible(
     _env: EnvUnowned,
     _this: jobject,
 ) -> jboolean {
-    system_bars::is_immersive()
+    system_bars::system_bars().status
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeNavigationBarVisible(
+    _env: EnvUnowned,
+    _this: jobject,
+) -> jboolean {
+    system_bars::system_bars().navigation
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeLightBarIcons(
+    _env: EnvUnowned,
+    _this: jobject,
+) -> jboolean {
+    system_bars::bar_icons() == system_bars::BarIcons::Light
 }
 
 /// Called by `RlobKitMainActivity`'s `OnApplyWindowInsetsListener`.
