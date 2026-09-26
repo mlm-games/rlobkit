@@ -41,6 +41,13 @@ pub fn init() {
     }
 }
 
+/// Register the host's `JavaVM` / `Context` pointers with `ndk-context` so the
+/// Android I/O layer can resolve them. Hosts pass the pointers the Android
+/// runtime hands to `android_main`, so they are not required to be `unsafe`.
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "hosts pass JavaVM/Context pointers straight from the Android runtime"
+)]
 pub fn init_with_android_context(
     #[cfg(target_os = "android")] vm: *mut std::ffi::c_void,
     #[cfg(target_os = "android")] context: *mut std::ffi::c_void,
