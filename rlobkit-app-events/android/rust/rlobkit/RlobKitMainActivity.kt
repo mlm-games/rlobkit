@@ -1,11 +1,15 @@
 package rust.rlobkit
 
 import android.app.NativeActivity
+import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.WindowInsets
@@ -19,6 +23,7 @@ import java.lang.ref.WeakReference
  * Handles:
  * - ACTION_VIEW intents (writes to pending_intent file)
  * - Window insets / IME (calls nativeOnWindowInsets via JNI)
+ * - The dynamic theme palette (calls nativeOnTheme via JNI)
  * - System bars, re-applied on request from the native side (refreshSystemBars)
  *
  * Reference this activity in your Cargo.toml:
@@ -29,6 +34,8 @@ import java.lang.ref.WeakReference
  *   launch_mode = "singleTask"
  */
 class RlobKitMainActivity : NativeActivity() {
+    private var wallpaperColorsListener: WallpaperManager.OnColorsChangedListener? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         RlobKitIntentBridge.captureViewIntent(intent, contentResolver, filesDir)
         super.onCreate(savedInstanceState)
@@ -36,6 +43,13 @@ class RlobKitMainActivity : NativeActivity() {
         loadLibraryForJni()
         setupWindowInsetsListener()
         applySystemBars()
+        pushDynamicTheme()
+        watchWallpaperColors()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        pushDynamicTheme()
     }
 
     override fun onResume() {
@@ -45,6 +59,7 @@ class RlobKitMainActivity : NativeActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unwatchWallpaperColors()
         if (current?.get() === this) current = null
     }
 
@@ -157,6 +172,39 @@ class RlobKitMainActivity : NativeActivity() {
         leftPx: Float, rightPx: Float,
         imeBottomPx: Float,
     )
+
+    external fun nativeOnTheme(data: ByteArray)
+
+    /**
+     * Hands the current system palette to the native side. Silent when the
+     * host app does not link the JNI bridge or runs below Android 12.
+     */
+    private fun pushDynamicTheme() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val dark = DynamicTheme.isNight(resources.configuration)
+        val bytes = DynamicTheme.build(resources, dark) ?: return
+        try {
+            nativeOnTheme(bytes)
+        } catch (_: UnsatisfiedLinkError) {
+        }
+    }
+
+    private fun watchWallpaperColors() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || wallpaperColorsListener != null) return
+        val listener = WallpaperManager.OnColorsChangedListener { _, _ ->
+            runOnUiThread { pushDynamicTheme() }
+        }
+        WallpaperManager.getInstance(applicationContext)
+            .addOnColorsChangedListener(listener, Handler(Looper.getMainLooper()))
+        wallpaperColorsListener = listener
+    }
+
+    private fun unwatchWallpaperColors() {
+        val listener = wallpaperColorsListener ?: return
+        wallpaperColorsListener = null
+        WallpaperManager.getInstance(applicationContext)
+            .removeOnColorsChangedListener(listener)
+    }
 
     external fun nativeStatusBarVisible(): Boolean
 
