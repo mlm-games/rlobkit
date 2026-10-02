@@ -22,6 +22,12 @@
 //! call [`insets::set_on_insets`] during init to forward the values into
 //! their own layout system.
 //!
+//! ## Theme
+//!
+//! `RlobKitMainActivity` may also call `nativeOnTheme` via JNI with a
+//! packed color packet, feeding the [`theme`] module.  Integrations
+//! forward it onwards the same way as insets, via [`theme::set_on_theme`].
+//!
 //! ## System bars
 //!
 //! `RlobKitMainActivity` boots edge-to-edge with system bars visible
@@ -53,6 +59,7 @@
 
 pub mod insets;
 pub mod system_bars;
+pub mod theme;
 
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub mod jni;

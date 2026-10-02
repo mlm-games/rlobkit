@@ -5,6 +5,7 @@
 
 use crate::insets::{WindowInsets, set_window_insets};
 use crate::system_bars;
+use crate::theme::ThemeColors;
 use jni::objects::JByteArray;
 use jni::sys::{jboolean, jbyteArray, jfloat, jobject};
 use jni::{EnvUnowned, errors::ThrowRuntimeExAndDefault};
@@ -53,6 +54,33 @@ pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeOnWindowInset
         right: right_px,
         ime_bottom: ime_bottom_px,
     });
+}
+
+/// Called by `RlobKitMainActivity`'s theme listener.
+///
+/// `data` is the packed RGBA bytes as produced by [`ThemeColors::as_bytes`]:
+/// 38 × 4 bytes, little-endian RGBA per color, in the order documented on
+/// [`theme::THEME_COLOR_COUNT`]. A malformed packet is logged and dropped.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeOnTheme(
+    mut env: EnvUnowned,
+    _this: jobject,
+    data: jbyteArray,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let array = unsafe { JByteArray::from_raw(env, data) };
+        let bytes = env.convert_byte_array(&array)?;
+        match ThemeColors::from_bytes(&bytes) {
+            Some(colors) => crate::theme::set_theme(colors),
+            None => log::warn!(
+                "rlobkit_app_events::jni: nativeOnTheme got {} bytes, want {}",
+                bytes.len(),
+                crate::theme::THEME_COLOR_COUNT * 4
+            ),
+        }
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Optional JNI hook called by `RlobKitMainActivity` in addition to the
