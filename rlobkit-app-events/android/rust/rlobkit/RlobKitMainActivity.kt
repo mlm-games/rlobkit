@@ -96,7 +96,7 @@ class RlobKitMainActivity : NativeActivity() {
             }
             val appearanceMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            controller.setSystemBarsAppearance(if (lightIcons) appearanceMask else 0, appearanceMask)
+            controller.setSystemBarsAppearance(if (lightIcons) 0 else appearanceMask, appearanceMask)
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility =
