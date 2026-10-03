@@ -3,13 +3,17 @@ package rust.rlobkit
 import android.app.NativeActivity
 import android.app.WallpaperManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.VibrationEffect
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import android.view.View
 import android.view.WindowInsets
@@ -25,6 +29,7 @@ import java.lang.ref.WeakReference
  * - Window insets / IME (calls nativeOnWindowInsets via JNI)
  * - The dynamic theme palette (calls nativeOnTheme via JNI)
  * - System bars, re-applied on request from the native side (refreshSystemBars)
+ * - Device vibration on request from the native side (rumble / rumbleStop)
  *
  * Reference this activity in your Cargo.toml:
  *
@@ -242,5 +247,47 @@ class RlobKitMainActivity : NativeActivity() {
             val activity = current?.get() ?: return
             activity.runOnUiThread { activity.applySystemBars() }
         }
+
+        /**
+         * Fires the device vibrator for `millis` at `amplitude` (1..255).
+         * Android has a single device vibrator shared by every gamepad, so
+         * this is device-wide haptics rather than per-pad rumble. Callable
+         * from any thread; a call before the Activity exists is a no-op.
+         */
+        @JvmStatic
+        fun rumble(millis: Long, amplitude: Int) {
+            val activity = current?.get() ?: return
+            activity.runOnUiThread {
+                val vibrator = deviceVibrator(activity) ?: return@runOnUiThread
+                if (Build.VERSION.SDK_INT >= 26) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(millis, amplitude.coerceIn(1, 255)))
+                } else {
+                    // Pre-26 has no VibrationEffect and no amplitude control.
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(millis)
+                }
+            }
+        }
+
+        /**
+         * Cancels any vibration [rumble] started. Same threading and
+         * pre-Activity rules as [rumble].
+         */
+        @JvmStatic
+        fun rumbleStop() {
+            val activity = current?.get() ?: return
+            activity.runOnUiThread {
+                val vibrator = deviceVibrator(activity) ?: return@runOnUiThread
+                vibrator.cancel()
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        private fun deviceVibrator(activity: RlobKitMainActivity): Vibrator? =
+            if (Build.VERSION.SDK_INT >= 31) {
+                activity.getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                activity.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
     }
 }

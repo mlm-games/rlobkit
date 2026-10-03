@@ -60,6 +60,7 @@
 pub mod insets;
 pub mod system_bars;
 pub mod theme;
+pub mod vibrator;
 
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub mod jni;
