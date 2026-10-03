@@ -35,6 +35,7 @@ fn post_rumble(duration_ms: u32, amplitude: i32) {
             jni_sig!("(JI)V"),
             &[JValue::Long(i64::from(duration_ms)), JValue::Int(amplitude)],
         )?;
+        env.exception_catch()?;
         Ok(())
     });
     if let Err(e) = result {
@@ -52,6 +53,7 @@ fn post_stop() {
             jni_sig!("()V"),
             &[],
         )?;
+        env.exception_catch()?;
         Ok(())
     });
     if let Err(e) = result {

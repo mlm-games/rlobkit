@@ -257,14 +257,21 @@ class RlobKitMainActivity : NativeActivity() {
         @JvmStatic
         fun rumble(millis: Long, amplitude: Int) {
             val activity = current?.get() ?: return
+            if (millis <= 0) return
             activity.runOnUiThread {
-                val vibrator = deviceVibrator(activity) ?: return@runOnUiThread
-                if (Build.VERSION.SDK_INT >= 26) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(millis, amplitude.coerceIn(1, 255)))
-                } else {
-                    // Pre-26 has no VibrationEffect and no amplitude control.
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(millis)
+                try {
+                    val vibrator = deviceVibrator(activity) ?: return@runOnUiThread
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        vibrator.vibrate(VibrationEffect.createOneShot(millis, amplitude.coerceIn(1, 255)))
+                    } else {
+                        // Pre-26 has no VibrationEffect and no amplitude control.
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(millis)
+                    }
+                } catch (e: Exception) {
+                    // A throw would reach the JNI caller or the UI thread's
+                    // uncaught handler; missing VIBRATE permission lands here.
+                    Log.w(TAG, "vibrate failed", e)
                 }
             }
         }
@@ -277,8 +284,12 @@ class RlobKitMainActivity : NativeActivity() {
         fun rumbleStop() {
             val activity = current?.get() ?: return
             activity.runOnUiThread {
-                val vibrator = deviceVibrator(activity) ?: return@runOnUiThread
-                vibrator.cancel()
+                try {
+                    val vibrator = deviceVibrator(activity) ?: return@runOnUiThread
+                    vibrator.cancel()
+                } catch (e: Exception) {
+                    Log.w(TAG, "rumbleStop failed", e)
+                }
             }
         }
 
