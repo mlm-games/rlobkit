@@ -3,16 +3,15 @@
 /// Vibrate the device for `duration_ms`. The two rumble channels mix the
 /// way Aurora's device haptics do (`0.6 * low + 0.4 * high`), because
 /// Android exposes one device vibrator rather than per-motor force
-/// feedback. A zero duration or zero strength stops vibration instead.
-/// No-op off Android or without the `jni-bridge` feature.
+/// feedback. A zero duration, or a strength below the smallest amplitude
+/// Android can express (1/255), stops vibration instead. No-op off Android
+/// or without the `jni-bridge` feature.
 pub fn rumble(low: f32, high: f32, duration_ms: u32) {
     let strength = (0.6 * low + 0.4 * high).clamp(0.0, 1.0);
-    if duration_ms > 0 && strength > 0.0 {
+    let amplitude = (strength * 255.0).round() as i32;
+    if duration_ms > 0 && (1..=255).contains(&amplitude) {
         #[cfg(all(feature = "jni-bridge", target_os = "android"))]
-        post_rumble(
-            duration_ms,
-            ((strength * 255.0).round() as i32).clamp(1, 255),
-        );
+        post_rumble(duration_ms, amplitude);
     } else {
         stop();
     }
