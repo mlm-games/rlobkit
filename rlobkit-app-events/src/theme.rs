@@ -4,8 +4,16 @@
 //! colors, which feeds into this module.  Framework integrations (e.g.
 //! repose-platform) subscribe via [`set_on_theme`] to forward the values into
 //! their own styling system, mirroring [`crate::insets`].
+//!
+//! Whether the system is light or dark is **not** here: winit already reports
+//! that as `Window::system_theme()`, and every app using this crate runs on winit.
+//! What winit has no notion of is the wallpaper-derived palette, which is a
+//! Material 3 concept Android only publishes from Android 12 — hence
+//! [`dynamic_colors_available`], which distinguishes "this Android cannot do
+//! dynamic color" from "nothing has arrived yet".
 
-use std::sync::OnceLock;
+use crate::subscriber::Subscriber;
+use std::sync::Mutex;
 
 /// Number of colors carried in a theme packet.
 ///
@@ -23,7 +31,7 @@ use std::sync::OnceLock;
 pub const THEME_COLOR_COUNT: usize = 38;
 
 /// A resolved UI palette, one RGBA quad per Material 3 role.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ThemeColors {
     pub rgba: [[u8; 4]; THEME_COLOR_COUNT],
 }
@@ -59,32 +67,52 @@ impl ThemeColors {
     }
 }
 
-static THEME_CB: OnceLock<Box<dyn Fn(ThemeColors) + Send + Sync>> = OnceLock::new();
-static LAST_THEME: std::sync::Mutex<Option<ThemeColors>> = std::sync::Mutex::new(None);
+static SUBSCRIBER: Subscriber<ThemeColors> = Subscriber::new();
+static LAST_THEME: Mutex<Option<ThemeColors>> = Mutex::new(None);
+static DYNAMIC_AVAILABLE: Mutex<bool> = Mutex::new(false);
 
 /// Register a callback invoked on every theme change.
 ///
-/// Called from the JNI thread (Java main thread).  The callback **must** be
-/// `Send + Sync` and should forward to the UI thread / styling system.
-pub fn set_on_theme(cb: Box<dyn Fn(ThemeColors) + Send + Sync>) {
-    // Forward the most recent value so the subscriber catches up.
-    if let Some(t) = LAST_THEME.lock().ok().and_then(|guard| *guard) {
-        cb(t);
+/// Replaces any previous subscriber and first replays the current palette if one
+/// has arrived, so a late subscriber catches up. Called from the JNI thread
+/// (Java main thread).  The callback **must** be `Send + Sync` and should forward
+/// to the UI thread / styling system.
+pub fn set_on_theme(cb: impl Fn(ThemeColors) + Send + Sync + 'static) {
+    let current = last_theme();
+    SUBSCRIBER.set(cb);
+    if let Some(current) = current {
+        SUBSCRIBER.notify(current);
     }
-    let _ = THEME_CB.set(cb);
 }
 
-/// Called by the JNI `nativeOnTheme` bridge.
-///
 /// Stores the latest palette and notifies the registered callback (if any).
 pub fn set_theme(colors: ThemeColors) {
     *LAST_THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(colors);
-    if let Some(cb) = THEME_CB.get() {
-        cb(colors);
-    }
+    *DYNAMIC_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    SUBSCRIBER.notify(colors);
 }
 
 /// Return the last reported palette, if any.
+///
+/// `None` means Android is older than 12, the shared Activity is not in use, or
+/// nothing has been pushed yet. [`dynamic_colors_available`] tells those apart.
 pub fn last_theme() -> Option<ThemeColors> {
     *LAST_THEME.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether this Android version publishes a wallpaper-derived palette at all,
+/// which needs Android 12 or later.
+///
+/// `false` before the first push, so treat it as "not known yet" rather than as a
+/// definite answer. It says nothing about whether a palette has *arrived*: for
+/// that, compare against [`last_theme`].
+pub fn dynamic_colors_available() -> bool {
+    *DYNAMIC_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Records whether this Android version publishes a palette, independently of
+/// whether one has arrived. Called by the JNI `nativeOnTheme` bridge.
+#[cfg(all(feature = "jni-bridge", target_os = "android"))]
+pub(crate) fn set_dynamic_colors_available(available: bool) {
+    *DYNAMIC_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) = available;
 }

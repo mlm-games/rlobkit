@@ -17,11 +17,18 @@ internal object DynamicTheme {
     private const val ACCENT1 = "accent1"
     private const val ACCENT2 = "accent2"
     private const val ACCENT3 = "accent3"
+    private const val NEUTRAL1 = "neutral1"
     private const val NEUTRAL2 = "neutral2"
 
     private val ACCENT_TONES = intArrayOf(10, 20, 30, 40, 80, 90, 100)
     private val NEUTRAL_TONES = intArrayOf(0, 10, 20, 30, 50, 60, 80, 90, 95, 99, 100)
 
+    /**
+     * Whether the system is in night mode.
+     *
+     * Used only to choose which half of the palette to read. The native side gets
+     * light/dark from winit's `Window::system_theme()`, not from here.
+     */
     fun isNight(config: Configuration): Boolean =
         (config.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
@@ -182,26 +189,29 @@ internal object DynamicTheme {
         out[13] = if (dark) 0xFF601410.toInt() else 0xFFFFFFFF.toInt()
         out[14] = if (dark) 0xFF8C1D18.toInt() else 0xFFFFDAD6.toInt()
         out[15] = if (dark) 0xFFF9DEDC.toInt() else 0xFF410002.toInt()
-        out[16] = tone(res, NEUTRAL2, if (dark) 6 else 98)
-        out[17] = tone(res, NEUTRAL2, if (dark) 90 else 10)
-        out[18] = tone(res, NEUTRAL2, if (dark) 6 else 98)
-        out[19] = tone(res, NEUTRAL2, if (dark) 90 else 10)
+        // Surfaces and their containers come from neutral1; neutral2 is the
+        // lower-contrast variant reserved for surface_variant and the outlines,
+        // which is the split the Material 3 tonal roles describe.
+        out[16] = tone(res, NEUTRAL1, if (dark) 6 else 98)
+        out[17] = tone(res, NEUTRAL1, if (dark) 90 else 10)
+        out[18] = tone(res, NEUTRAL1, if (dark) 6 else 98)
+        out[19] = tone(res, NEUTRAL1, if (dark) 90 else 10)
         out[20] = tone(res, NEUTRAL2, if (dark) 30 else 90)
         out[21] = tone(res, NEUTRAL2, if (dark) 80 else 30)
-        out[22] = tone(res, NEUTRAL2, if (dark) 4 else 100)
-        out[23] = tone(res, NEUTRAL2, if (dark) 10 else 96)
-        out[24] = tone(res, NEUTRAL2, if (dark) 12 else 94)
-        out[25] = tone(res, NEUTRAL2, if (dark) 17 else 92)
-        out[26] = tone(res, NEUTRAL2, if (dark) 22 else 90)
-        out[27] = tone(res, NEUTRAL2, if (dark) 24 else 98)
-        out[28] = tone(res, NEUTRAL2, if (dark) 6 else 87)
+        out[22] = tone(res, NEUTRAL1, if (dark) 4 else 100)
+        out[23] = tone(res, NEUTRAL1, if (dark) 10 else 96)
+        out[24] = tone(res, NEUTRAL1, if (dark) 12 else 94)
+        out[25] = tone(res, NEUTRAL1, if (dark) 17 else 92)
+        out[26] = tone(res, NEUTRAL1, if (dark) 22 else 90)
+        out[27] = tone(res, NEUTRAL1, if (dark) 24 else 98)
+        out[28] = tone(res, NEUTRAL1, if (dark) 6 else 87)
         out[29] = out[0]
-        out[30] = tone(res, NEUTRAL2, if (dark) 90 else 20)
-        out[31] = tone(res, NEUTRAL2, if (dark) 20 else 95)
+        out[30] = tone(res, NEUTRAL1, if (dark) 90 else 20)
+        out[31] = tone(res, NEUTRAL1, if (dark) 20 else 95)
         out[32] = tone(res, ACCENT1, if (dark) 40 else 80)
         out[33] = tone(res, NEUTRAL2, if (dark) 60 else 50)
         out[34] = tone(res, NEUTRAL2, if (dark) 30 else 80)
-        out[35] = tone(res, NEUTRAL2, 0)
+        out[35] = tone(res, NEUTRAL1, 0)
         out[36] = out[35]
         out[37] = out[0]
     }
@@ -213,7 +223,11 @@ internal object DynamicTheme {
      * requested tone with the palette's hue.
      */
     private fun tone(res: Resources, palette: String, target: Int): Int {
-        val tones = if (palette == NEUTRAL2) NEUTRAL_TONES else ACCENT_TONES
+        val tones = if (palette == ACCENT1 || palette == ACCENT2 || palette == ACCENT3) {
+            ACCENT_TONES
+        } else {
+            NEUTRAL_TONES
+        }
         if (target in tones) {
             return color(res, palette, target)
         }
@@ -230,6 +244,14 @@ internal object DynamicTheme {
     private fun color(res: Resources, palette: String, tone: Int): Int =
         res.getColor(idOf(palette, tone), null)
 
+    /**
+     * The resource id for a palette colour at [tone].
+     *
+     * AOSP names these by lightness rather than by tone, so the suffix is
+     * `(100 - tone) * 10`: `system_accent1_900` is tone 10, and `..._1000` is
+     * tone 0. Each palette ships a different subset of tones, which is why the
+     * accent and neutral tables are spelled out rather than computed.
+     */
     private fun idOf(palette: String, tone: Int): Int = when (palette) {
         ACCENT1 -> when (tone) {
             10 -> android.R.color.system_accent1_900
@@ -259,6 +281,20 @@ internal object DynamicTheme {
             80 -> android.R.color.system_accent3_200
             90 -> android.R.color.system_accent3_100
             else -> android.R.color.system_accent3_0
+        }
+
+        NEUTRAL1 -> when (tone) {
+            10 -> android.R.color.system_neutral1_900
+            20 -> android.R.color.system_neutral1_800
+            30 -> android.R.color.system_neutral1_700
+            50 -> android.R.color.system_neutral1_500
+            60 -> android.R.color.system_neutral1_400
+            80 -> android.R.color.system_neutral1_200
+            90 -> android.R.color.system_neutral1_100
+            95 -> android.R.color.system_neutral1_50
+            99 -> android.R.color.system_neutral1_10
+            100 -> android.R.color.system_neutral1_0
+            else -> android.R.color.system_neutral1_1000
         }
 
         else -> when (tone) {

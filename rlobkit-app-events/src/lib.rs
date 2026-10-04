@@ -1,66 +1,73 @@
-//! Shared Android intent capture, window insets, system bars, and the shared
-//! `RlobKitMainActivity` (Kotlin).
+//! Android platform glue that winit does not already provide.
 //!
-//! ## Intents
+//! The Kotlin `RlobKitMainActivity` (or a custom subclass) is the Android side of
+//! all of this. It pushes state in over JNI; the modules here own the state and
+//! expose it as plain Rust.
 //!
-//! 1. The Kotlin `RlobKitMainActivity` (or a custom subclass) calls
-//!    `RlobKitIntentBridge.captureViewIntent()` which reads the `content://`
-//!    URI via `ContentResolver` and writes the raw bytes to
-//!    `<filesDir>/pending_intent`.
+//! ## What is here, and why not winit
 //!
-//! 2. Rust `android_main()` calls [`take_pending_intent`] to grab the initial
-//!    intent before the UI starts.
+//! - [`insets`] — winit's Android insets are unimplemented (it logs a `TODO` and
+//!   drops the notification), so cutout, gesture-area and IME geometry has to come
+//!   from here.
+//! - [`theme`] — the wallpaper-derived Material 3 palette. winit's `Theme` is only
+//!   a light/dark enum.
+//! - [`system_bars`] — system bar visibility and the edge-to-edge policy; winit
+//!   exposes neither on Android.
+//! - [`back`] — back invocation and predictive-back handling; winit has neither.
+//! - [`memory`] — `onTrimMemory` / `onLowMemory`, which winit does not surface.
+//! - [`intents`] — incoming shares. Captured as URI-backed files rather than
+//!   bytes, so a large video is not read on the main thread. Call
+//!   [`intents::take_pending_intent`] before the UI loop starts and
+//!   [`intents::drain_intents`] each frame.
 //!
-//! 3. For runtime `onNewIntent` intents, poll [`take_pending_intent`] each
-//!    frame or subscribe via [`drain_intents`].
+//! ## What is deliberately absent
 //!
-//! ## Window insets
+//! Light/dark mode and the Activity lifecycle are **not** here. winit reports the
+//! first as `Window::system_theme()` and the second as `ApplicationHandler` /
+//! window events, and every app using this crate already runs on winit. Anything
+//! winit can answer is left to winit; duplicating it here would only create a
+//! second source of truth that can disagree.
 //!
-//! `RlobKitMainActivity` registers an `OnApplyWindowInsetsListener` that
-//! calls `nativeOnWindowInsets` via JNI.  The Rust JNI bridge feeds into
-//! the [`insets`] module.  Framework integrations (e.g. repose-platform)
-//! call [`insets::set_on_insets`] during init to forward the values into
-//! their own layout system.
+//! ## Feature flags
 //!
-//! ## Theme
+//! Everything that reaches the Activity over JNI needs the `jni-bridge` feature.
+//! Without it the shared Activity still works — it guards its native calls — but
+//! nothing is pushed, so every `last_*`/`system_*` accessor here stays `None`.
 //!
-//! `RlobKitMainActivity` may also call `nativeOnTheme` via JNI with a
-//! packed color packet, feeding the [`theme`] module.  Integrations
-//! forward it onwards the same way as insets, via [`theme::set_on_theme`].
-//!
-//! ## System bars
-//!
-//! `RlobKitMainActivity` boots edge-to-edge with system bars visible
-//! (matching `enableEdgeToEdge()` semantics).  Full-screen apps opt in
-//! via [`system_bars::set_immersive_sticky`]\(true\) once from
-//! `android_main`. [`system_bars::set_system_bars_visible`] hides or shows
-//! either bar on its own, applies immediately, and so also toggles while the
-//! app runs. [`system_bars::set_bar_icons`] matches the icons in a visible bar
-//! to the app's background.  Both require the `jni-bridge` feature on Android
-//! and only record the state elsewhere.  The state lives in this module and
-//! the Activity reads it back, so a host shipping its own Activity subclass
-//! needs its own entry point.
+//! Enabling the feature is not by itself enough: without it the Activity's native
+//! calls all fail with `UnsatisfiedLinkError`, which it tolerates, so nothing is
+//! pushed and nothing reports why. [`jni::verify_linked`] checks for that.
 //!
 //! ## Example
 //!
 //! ```ignore
-//! use rlobkit_app_events::AppIntent;
+//! use rlobkit_app_events::{insets, intents, memory};
 //!
 //! fn android_main(android_app: AndroidApp) {
+//!     rlobkit_app_events::jni::verify_linked();
+//!
+//!     insets::set_on_insets(|i| println!("safe area {:?}", i.safe()));
+//!     memory::set_on_memory_pressure(|p| println!("{p:?}"));
+//!
 //!     let data_dir = android_app.internal_data_path();
-//!     if let Some(dir) = &data_dir {
-//!         if let Some(intent) = rlobkit_app_events::take_pending_intent(dir) {
-//!             // process intent.data
+//!     if let Some(intent) = data_dir.and_then(|d| intents::take_pending_intent(d)) {
+//!         for file in &intent.files {
+//!             println!("{} ({:?})", file.name(), file.mime_type());
 //!         }
 //!     }
 //!     // ...
 //! }
 //! ```
 
+pub mod back;
 pub mod insets;
+pub mod intents;
+pub mod memory;
 pub mod system_bars;
 pub mod theme;
 pub mod vibrator;
+
+mod subscriber;
 
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub mod jni;
@@ -68,99 +75,4 @@ pub mod jni;
 #[cfg(target_os = "android")]
 pub mod android_log;
 
-use std::path::Path;
-
-/// An incoming `ACTION_VIEW` intent.
-#[derive(Debug, Clone)]
-pub struct AppIntent {
-    /// Raw bytes read from the content:// URI.
-    pub data: Vec<u8>,
-    /// Human-readable label (last segment of the URI, or "Shared file").
-    pub name: String,
-}
-
-const PENDING_FILE: &str = "pending_intent";
-const PENDING_NAME_FILE: &str = "pending_intent.name";
-
-/// Read and remove the `pending_intent` file saved by the Kotlin bridge.
-///
-/// Call this from `android_main` **before** starting the UI loop to capture
-/// the intent that launched the app.  Returns `None` if no intent file
-/// exists or if I/O fails.
-pub fn take_pending_intent(data_dir: &Path) -> Option<AppIntent> {
-    let path = data_dir.join(PENDING_FILE);
-    let data = std::fs::read(&path).ok()?;
-    let _ = std::fs::remove_file(&path);
-    if data.is_empty() {
-        return None;
-    }
-    // Best-effort display name persisted alongside the bytes by the bridge.
-    // Falls back to content sniffing (mp4 magic) and finally a generic label.
-    let name_path = data_dir.join(PENDING_NAME_FILE);
-    let name = std::fs::read_to_string(&name_path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| sniff_name(&data));
-    let _ = std::fs::remove_file(&name_path);
-    let name = name.unwrap_or_else(|| "Shared file".into());
-    #[cfg(target_os = "android")]
-    log::info!(
-        "rlobkit_app_events: took pending intent ({} bytes, name={name})",
-        data.len()
-    );
-    Some(AppIntent { name, data })
-}
-
-/// Guess a filename (extension only matters) from magic bytes so downstream
-/// format probing gets the right hint even when the URI gave no name.
-fn sniff_name(data: &[u8]) -> Option<String> {
-    if data.len() >= 12 && &data[4..8] == b"ftyp" {
-        let brand = &data[8..12.min(data.len())];
-        let ext = match brand {
-            b"isom" | b"mp41" | b"mp42" => "mp4",
-            b"M4V " | b"mmp4" => "m4v",
-            b"M4A " => "m4a",
-            _ => "mp4",
-        };
-        return Some(format!("Shared file.{ext}"));
-    }
-    if data.len() >= 4 && &data[..4] == b"ID3 " || data.len() >= 2 && &data[..2] == b"\xff\xfb" {
-        return Some("Shared file.mp3".into());
-    }
-    if data.len() >= 4 && &data[..4] == b"OggS" {
-        return Some("Shared file.ogg".into());
-    }
-    if data.len() >= 4 && &data[..4] == b"fLaC" {
-        return Some("Shared file.flac".into());
-    }
-    if data.len() >= 4 && &data[..4] == b"RIFF" {
-        return Some("Shared file.wav".into());
-    }
-    None
-}
-
-use std::sync::Mutex;
-
-static RUNTIME_QUEUE: Mutex<Option<Vec<AppIntent>>> = Mutex::new(None);
-
-/// Push an intent for processing on the next frame.
-///
-/// This is safe to call before Rust static initialisers have run (the mutex
-/// is lazily allocated).  Typically called from a JNI `nativeOnNewIntent`
-/// callback or from a per-frame file poll.
-pub fn push_intent(data: Vec<u8>) {
-    let mut queue = RUNTIME_QUEUE.lock().unwrap_or_else(|e| e.into_inner());
-    queue.get_or_insert_with(Vec::new).push(AppIntent {
-        name: "Shared file".into(),
-        data,
-    });
-}
-
-/// Drain all runtime intents queued since the last call.
-///
-/// Call this each frame in the render loop.
-pub fn drain_intents() -> Vec<AppIntent> {
-    let mut queue = RUNTIME_QUEUE.lock().unwrap_or_else(|e| e.into_inner());
-    queue.take().unwrap_or_default()
-}
+pub use intents::AppIntent;

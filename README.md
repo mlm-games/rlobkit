@@ -9,7 +9,7 @@ Workspace crates:
 | `rlobkit-core` | `PlatformFile` / `PlatformDirectory`, I/O, paths helpers, errors |
 | `rlobkit-dialogs` | Open / save / directory pickers (async + desktop blocking helpers) |
 | `rlobkit-image` | Image resize/compress (JPEG/PNG/WebP) |
-| `rlobkit-app-events` | Android VIEW intents + window insets bridge |
+| `rlobkit-app-events` | Android glue winit lacks: insets, dynamic colors, system bars, back, memory pressure, intents |
 
 License: MIT  
 Version: see workspace `Cargo.toml` (currently 0.5.x)
@@ -26,6 +26,9 @@ Android integration works but is constrained by OS/platform APIs (not a Rust lim
 | Path-backed I/O | yes | URI via registered JNI I/O | N/A (bytes only) |
 | Blocking picker helpers | yes | — | — |
 | List directory files | path | not yet for SAF URI | — |
+| Dynamic (wallpaper) colors | — | Material 3 palette, Android 12+ | — |
+| Edge-to-edge insets / cutout / gestures | winit desktop | yes (winit Android lacks it) | — |
+| Back + predictive back | winit desktop | yes | — |
 | Image compress | yes | yes | yes (if you pull the crate) |
 
 ## rlobkit-core
@@ -116,12 +119,49 @@ Uses the `image` crate with jpeg/png/webp features. Resize uses Lanczos3 when la
 
 ## rlobkit-app-events
 
-Android-oriented glue (optional `jni-bridge` feature):
+Android glue for what winit cannot do. Apps that use this crate run on winit, so
+anything winit already answers is left to winit rather than duplicated here — two
+sources for the same fact can only disagree.
 
-- Capture `ACTION_VIEW` / shared content: Kotlin bridge writes bytes to `pending_intent` under the app files dir; Rust `take_pending_intent(data_dir)` consumes it at startup
-- Runtime intents: `push_intent` / `drain_intents` (e.g. each frame)
-- Window insets: `WindowInsets` (top/bottom/left/right/ime_bottom); `set_on_insets` callback; fed from `RlobKitMainActivity` via JNI
+**Here because winit has no equivalent** (optional `jni-bridge` feature):
+
+- **Insets** — winit's Android insets are unimplemented (it receives the
+  notification and logs a `TODO`), so bar/IME rectangles, display cutout, gesture
+  exclusion areas, per-region visibility and IME animation progress come from
+  here. `set_on_insets`, `last_window_insets`
+- **Dynamic theme** — the wallpaper-derived Material 3 palette. winit's `Theme` is
+  only a light/dark enum. `last_theme`, `set_on_theme`,
+  `dynamic_colors_available`
+- **System bars / edge-to-edge** — bar visibility and the `EdgeToEdgeMode` policy
+  (`Disabled` / `Enabled` / `Immersive`); winit exposes neither on Android
+- **Back** — `set_on_back` decides what a back press does (consume it, or let the
+  system go home); `set_on_back_event` observes predictive-back gesture phases
+- **Memory pressure** — `onTrimMemory` / `onLowMemory`, which winit does not surface
+- **Intents** — `ACTION_VIEW` / `ACTION_SEND` / `ACTION_SEND_MULTIPLE` captured as
+  URI-backed records, not bytes; `take_pending_intent` at startup and
+  `drain_intents` per frame
 - Shared Kotlin: `RlobKitMainActivity`, `RlobKitIntentBridge`
+
+Reading a captured file's contents goes through `PlatformFile::read_bytes`, so it
+needs `rlobkit_dialogs::init()` registered as for any other URI-backed file.
+
+**Deliberately absent, because winit covers it:** light/dark mode
+(`Window::system_theme()`) and the Activity lifecycle / window focus
+(`ApplicationHandler::{resumed, suspended}` plus the `Focused` / `Resumed` window
+events).
+
+### Enabling the JNI bridge
+
+Apps that want state pushed from the Activity need the `jni-bridge` feature. Any
+app that calls into this crate already keeps the Activity's native entry points
+linked, so there is nothing extra to wire up; `jni::verify_linked()` is available
+for the one failure that is otherwise silent — an app that receives no inset,
+palette or back event, and no error explaining why.
+
+Host apps are responsible for the manifest permissions they use: `VIBRATE` for
+`vibrator`, and `android:enableOnBackInvokedCallback="true"` to get predictive
+back on Android 13 and 14. Predictive-back *progress* additionally needs AndroidX:
+the platform SDK has no public way to register `OnBackAnimationCallback`.
 
 Useful when embedding in a NativeActivity / custom activity stack (e.g. repose-platform, yadaw).
 

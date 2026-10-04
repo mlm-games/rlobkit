@@ -718,6 +718,7 @@ dependencies = [
  "jni-min-helper",
  "log",
  "paranoid-android",
+ "rlobkit-core",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
