@@ -322,6 +322,19 @@ fn activity_present() -> bool {
     .is_ok()
 }
 
+/// Called by the shared `RlobKitMainActivity` after it has written an intent
+/// record to the queue, so an app whose frame loop is asleep can wake and
+/// drain it. Only the doorbell: the record itself is read back through
+/// [`crate::intents::take_pending_intent`] or
+/// [`crate::intents::drain_intents_from`].
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeOnIntentQueued(
+    _env: EnvUnowned,
+    _this: jobject,
+) {
+    crate::intents::notify_new_intent();
+}
+
 /// Optional JNI hook an app's own Activity subclass can declare to get intents
 /// as soon as they arrive, instead of waiting for the file queue to be polled.
 ///
@@ -347,6 +360,7 @@ pub unsafe fn decode_and_push_intent(env: &mut jni::EnvUnowned, data: jbyteArray
                     intent.files.len()
                 );
                 crate::intents::push_intent(intent);
+                crate::intents::notify_new_intent();
             }
             None => log::warn!("rlobkit_app_events::jni: unreadable intent record"),
         }

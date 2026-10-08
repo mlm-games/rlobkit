@@ -102,6 +102,10 @@ class RlobKitMainActivity : NativeActivity() {
         super.onNewIntent(intent)
         RlobKitIntentBridge.capture(intent, contentResolver, filesDir)
         setIntent(Intent(Intent.ACTION_MAIN))
+        try {
+            nativeOnIntentQueued()
+        } catch (_: UnsatisfiedLinkError) {
+        }
     }
 
     /**
@@ -443,6 +447,12 @@ class RlobKitMainActivity : NativeActivity() {
     external fun nativeLightBarIcons(): Boolean
 
     external fun nativeEdgeToEdge(): Int
+
+    /**
+     * An intent record was just written to the queue; wakes the native side so
+     * it can drain it. Optional, like every other external here.
+     */
+    external fun nativeOnIntentQueued()
 
     /** `WindowInsets.isVisible` as the wire values the native side expects. */
     private fun visibility(insets: WindowInsets, typeMask: Int): Int = when {

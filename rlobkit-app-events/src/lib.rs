@@ -18,7 +18,9 @@
 //! - [`intents`] — incoming shares. Captured as URI-backed files rather than
 //!   bytes, so a large video is not read on the main thread. Call
 //!   [`intents::take_pending_intent`] before the UI loop starts and
-//!   [`intents::drain_intents`] each frame.
+//!   [`intents::drain_intents`] each frame;
+//!   [`intents::set_on_new_intent`] wakes a sleeping loop when a record
+//!   arrives.
 //!
 //! ## What is deliberately absent
 //!

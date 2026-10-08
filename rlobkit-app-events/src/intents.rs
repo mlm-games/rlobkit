@@ -190,6 +190,38 @@ pub fn drain_intents() -> Vec<AppIntent> {
     queue.take().unwrap_or_default()
 }
 
+static ON_NEW_INTENT: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> =
+    std::sync::Mutex::new(None);
+
+/// Register a wake-up callback for a newly captured intent record.
+///
+/// Fires on the Java main thread as soon as the Activity has written the
+/// record to the queue: a doorbell, not the payload. Read the record on the
+/// next frame with [`take_pending_intent`] or [`drain_intents_from`].
+///
+/// Use it to wake a sleeping UI loop (winit's `wake_event_loop`, egui's
+/// `request_repaint`), never to process the intent. Replaces any previous
+/// callback; the callback is cloned out before it runs, so it may re-enter
+/// this module.
+pub fn set_on_new_intent(cb: impl Fn() + Send + Sync + 'static) {
+    let mut slot = ON_NEW_INTENT.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = Some(std::sync::Arc::new(cb));
+}
+
+/// Ring the [`set_on_new_intent`] doorbell, if one is registered.
+///
+/// Called by the shared Activity over JNI right after it queues a record;
+/// call it yourself if a custom Activity writes records without that hook.
+pub fn notify_new_intent() {
+    let cb = {
+        let slot = ON_NEW_INTENT.lock().unwrap_or_else(|e| e.into_inner());
+        slot.clone()
+    };
+    if let Some(cb) = cb {
+        cb();
+    }
+}
+
 #[cfg(target_os = "android")]
 struct Reader<'a> {
     bytes: &'a [u8],
