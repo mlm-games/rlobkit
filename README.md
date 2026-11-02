@@ -169,6 +169,18 @@ back on Android 13 and 14. With `cargo rapk` that is
 Compiling the Activity needs an Android 34 (or newer) SDK; older devices still
 run it because the API check is at runtime.
 
+Every entry point here lives on `RlobKitMainActivity`, so the app has to use it:
+
+```toml
+[package.metadata.android.application]
+enable_on_back_invoked_callback = true
+
+[[package.metadata.android.application.activity]]
+name = "rust.rlobkit.RlobKitMainActivity"
+exported = true
+launch_mode = "singleTask"
+```
+
 Useful when embedding in a NativeActivity / custom activity stack (e.g. repose-platform, yadaw).
 
 ## Workspace usage
