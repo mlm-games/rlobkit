@@ -134,8 +134,10 @@ sources for the same fact can only disagree.
   `dynamic_colors_available`
 - **System bars / edge-to-edge** — bar visibility and the `EdgeToEdgeMode` policy
   (`Disabled` / `Enabled` / `Immersive`); winit exposes neither on Android
-- **Back** — `set_on_back` decides what a back press does (consume it, or let the
-  system go home); `set_on_back_event` observes predictive-back gesture phases
+- **Back** — `set_handled` registers the predictive-back callback only while
+  there is somewhere to go; `set_on_back` decides what a press does (consume it,
+  or let the system go home); `set_on_back_event` observes gesture phases and
+  `progress` / `gesture_active` expose the latest one
 - **Memory pressure** — `onTrimMemory` / `onLowMemory`, which winit does not surface
 - **Intents** — `ACTION_VIEW` / `ACTION_SEND` / `ACTION_SEND_MULTIPLE` captured as
   URI-backed records, not bytes; `take_pending_intent` at startup and
@@ -160,8 +162,12 @@ palette or back event, and no error explaining why.
 
 Host apps are responsible for the manifest permissions they use: `VIBRATE` for
 `vibrator`, and `android:enableOnBackInvokedCallback="true"` to get predictive
-back on Android 13 and 14. Predictive-back *progress* additionally needs AndroidX:
-the platform SDK has no public way to register `OnBackAnimationCallback`.
+back on Android 13 and 14. With `cargo rapk` that is
+`enable_on_back_invoked_callback = true` under
+`[package.metadata.android.application]`. The Activity implements
+`OnBackAnimationCallback` itself on Android 14, so AndroidX is not required.
+Compiling the Activity needs an Android 34 (or newer) SDK; older devices still
+run it because the API check is at runtime.
 
 Useful when embedding in a NativeActivity / custom activity stack (e.g. repose-platform, yadaw).
 

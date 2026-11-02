@@ -15,11 +15,14 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.window.BackEvent
+import android.window.OnBackAnimationCallback
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import java.lang.ref.WeakReference
@@ -32,7 +35,7 @@ import java.lang.ref.WeakReference
  * - Window insets, IME, cutouts and gesture areas (nativeOnWindowInsets)
  * - The dynamic theme palette (nativeOnTheme); light/dark comes from winit
  * - Memory pressure (nativeOnMemoryPressure); the lifecycle comes from winit
- * - Back invocation and the predictive-back gesture (nativeOnBack)
+ * - Back invocation and the predictive-back gesture (nativeOnBack, nativeOnBackEvent)
  * - System bars and the edge-to-edge policy, re-applied on request (refreshSystemBars)
  * - Device vibration on request from the native side (rumble / rumbleStop)
  *
@@ -50,6 +53,9 @@ import java.lang.ref.WeakReference
 class RlobKitMainActivity : NativeActivity() {
     private var wallpaperColorsListener: WallpaperManager.OnColorsChangedListener? = null
     private var backCallback: OnBackInvokedCallback? = null
+    private var backHandled = false
+    private var backGestureInProgress = false
+    private var pendingBackHandled: Boolean? = null
     private var imeAnimationProgress = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,7 +65,7 @@ class RlobKitMainActivity : NativeActivity() {
         loadLibraryForJni()
         setupWindowInsetsListener()
         setupImeAnimationListener()
-        setupBackHandling()
+        applyBackHandled(desiredBackHandled)
         applySystemBars()
         pushAppearance()
         watchWallpaperColors()
@@ -330,18 +336,40 @@ class RlobKitMainActivity : NativeActivity() {
     /**
      * Wires back invocation, preferring the predictive-back APIs.
      *
-     * `OnBackInvokedDispatcher` is available from Android 13. The predictive-back
-     * *gesture progress* is not reachable here: `OnBackAnimationCallback` is a
-     * public interface with no public registration method, so an app that needs
-     * the phases registers it through AndroidX and forwards them via
-     * [nativeOnBackEvent]. The invocation callback is always registered at the
-     * default priority, and the decision it returns is acted on immediately,
-     * which is what lets an app with no internal navigation fall through to the
-     * system's own back-to-home.
+     * The callback is registered only while the native side reports that it
+     * would handle back. With nothing registered the system plays its own
+     * back-to-home animation, which is the correct behaviour at a root screen.
+     *
+     * From Android 14 the callback implements [OnBackAnimationCallback], so the
+     * platform reports the gesture's start, progress and cancellation before it
+     * invokes. Android 13 gets the invocation only.
      */
-    private fun setupBackHandling() {
-        if (Build.VERSION.SDK_INT < 33) return
-        val callback = OnBackInvokedCallback { handleBack() }
+    private fun installBackHandling() {
+        if (Build.VERSION.SDK_INT < 33 || backCallback != null) return
+        val callback: OnBackInvokedCallback = if (Build.VERSION.SDK_INT >= 34) {
+            object : OnBackAnimationCallback {
+                override fun onBackStarted(event: BackEvent) {
+                    backGestureInProgress = true
+                    dispatchBackEvent(EVENT_STARTED, 0f)
+                }
+
+                override fun onBackProgressed(event: BackEvent) {
+                    dispatchBackEvent(EVENT_PROGRESS, event.progress.coerceIn(0f, 1f))
+                }
+
+                override fun onBackCancelled() {
+                    backGestureInProgress = false
+                    dispatchBackEvent(EVENT_CANCELLED, 0f)
+                    settleBackHandling()
+                }
+
+                override fun onBackInvoked() {
+                    handleBack()
+                }
+            }
+        } else {
+            OnBackInvokedCallback { handleBack() }
+        }
         backCallback = callback
         onBackInvokedDispatcher.registerOnBackInvokedCallback(
             OnBackInvokedDispatcher.PRIORITY_DEFAULT,
@@ -354,6 +382,31 @@ class RlobKitMainActivity : NativeActivity() {
         backCallback = null
     }
 
+    private fun applyBackHandled(handled: Boolean) {
+        if (isFinishing || isDestroyed) return
+        if (backGestureInProgress) {
+            pendingBackHandled = handled
+            return
+        }
+        if (backHandled == handled) return
+        backHandled = handled
+        if (Build.VERSION.SDK_INT < 33) return
+        if (handled) installBackHandling() else releaseBackHandling()
+    }
+
+    private fun settleBackHandling() {
+        val pending = pendingBackHandled ?: return
+        pendingBackHandled = null
+        applyBackHandled(pending)
+    }
+
+    private fun dispatchBackEvent(phase: Int, progress: Float) {
+        try {
+            nativeOnBackEvent(phase, progress)
+        } catch (_: UnsatisfiedLinkError) {
+        }
+    }
+
     /**
      * Asks the native side what back should do and carries it out.
      *
@@ -361,16 +414,32 @@ class RlobKitMainActivity : NativeActivity() {
      * so the Activity finishes as it otherwise would.
      */
     private fun handleBack() {
+        backGestureInProgress = false
         val outcome = try {
             nativeOnBack()
         } catch (_: UnsatisfiedLinkError) {
             BACK_PROPAGATE
         }
         when (outcome) {
-            BACK_CONSUMED -> Unit
-            BACK_CROSS_ACTIVITY -> Unit
+            BACK_CONSUMED, BACK_CROSS_ACTIVITY -> dispatchBackEvent(EVENT_INVOKED, 1f)
             else -> finish()
         }
+        settleBackHandling()
+    }
+
+    /**
+     * Hardware and pre-Android-13 back keys, routed through the same native
+     * decision as the gesture. Below 13 the callback does not exist, so this is
+     * the only path; above it, it keeps a hardware keyboard consistent.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && backHandled) {
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                handleBack()
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     /**
@@ -431,13 +500,7 @@ class RlobKitMainActivity : NativeActivity() {
 
     external fun nativeOnBack(): Int
 
-    /**
-     * Predictive-back gesture progress, for a subclass to forward.
-     *
-     * The platform SDK has no public way to register `OnBackAnimationCallback`,
-     * so this Activity cannot observe the gesture itself; an app that needs the
-     * phases registers the callback through AndroidX and calls this from it.
-     */
+    /** Predictive-back gesture phases, forwarded to the native side. */
     external fun nativeOnBackEvent(phase: Int, progress: Float)
 
     external fun nativeStatusBarVisible(): Boolean
@@ -504,6 +567,37 @@ class RlobKitMainActivity : NativeActivity() {
 
         @Volatile
         private var current: WeakReference<RlobKitMainActivity>? = null
+
+        /**
+         * Whether the native side would handle back. Kept here as well as on
+         * the instance so a call made before the Activity exists is applied
+         * when it is created.
+         */
+        @Volatile
+        private var desiredBackHandled = false
+
+        /**
+         * Registers or releases the back callback. Callable from any thread;
+         * `false` leaves the system's own back-to-home animation in place.
+         */
+        @JvmStatic
+        fun setBackHandled(handled: Boolean) {
+            desiredBackHandled = handled
+            current?.get()?.let { activity ->
+                activity.runOnUiThread { activity.applyBackHandled(handled) }
+            }
+        }
+
+        /**
+         * Finishes the Activity when a back gesture was registered as handled
+         * but nothing consumed it by the time it committed.
+         */
+        @JvmStatic
+        fun finishActivity() {
+            current?.get()?.let { activity ->
+                activity.runOnUiThread { activity.finish() }
+            }
+        }
 
         /**
          * Re-applies the system-bar state the native side owns. Callable from
