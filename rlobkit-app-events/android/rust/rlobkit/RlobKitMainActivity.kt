@@ -420,10 +420,10 @@ class RlobKitMainActivity : NativeActivity() {
         } catch (_: UnsatisfiedLinkError) {
             BACK_PROPAGATE
         }
-        when (outcome) {
-            BACK_CONSUMED, BACK_CROSS_ACTIVITY -> dispatchBackEvent(EVENT_INVOKED, 1f)
-            else -> finish()
-        }
+        // Every outcome ends the gesture, including the one that leaves the
+        // Activity, or the native side would keep the last drag progress.
+        dispatchBackEvent(EVENT_INVOKED, 1f)
+        if (outcome != BACK_CONSUMED && outcome != BACK_CROSS_ACTIVITY) finish()
         settleBackHandling()
     }
 
