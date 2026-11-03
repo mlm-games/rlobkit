@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -79,6 +80,12 @@ class RlobKitMainActivity : NativeActivity() {
     override fun onDestroy() {
         unwatchWallpaperColors()
         if (Build.VERSION.SDK_INT >= 33) releaseBackHandling()
+        // android-activity's native destroy callback waits for the Rust thread
+        // to stop, but winit 0.30 never exits its Android loop on
+        // MainEvent::Destroy. Calling super would block the main thread forever,
+        // leaving the next launch stuck on the splash. A native activity that is
+        // being destroyed has no state left to keep; end the process instead.
+        Process.killProcess(Process.myPid())
         super.onDestroy()
         if (current?.get() === this) current = null
     }
@@ -350,11 +357,11 @@ class RlobKitMainActivity : NativeActivity() {
             object : OnBackAnimationCallback {
                 override fun onBackStarted(event: BackEvent) {
                     backGestureInProgress = true
-                    dispatchBackEvent(EVENT_STARTED, 0f)
+                    dispatchBackEvent(EVENT_STARTED, 0f, event.swipeEdge)
                 }
 
                 override fun onBackProgressed(event: BackEvent) {
-                    dispatchBackEvent(EVENT_PROGRESS, event.progress.coerceIn(0f, 1f))
+                    dispatchBackEvent(EVENT_PROGRESS, event.progress.coerceIn(0f, 1f), event.swipeEdge)
                 }
 
                 override fun onBackCancelled() {
@@ -400,9 +407,9 @@ class RlobKitMainActivity : NativeActivity() {
         applyBackHandled(pending)
     }
 
-    private fun dispatchBackEvent(phase: Int, progress: Float) {
+    private fun dispatchBackEvent(phase: Int, progress: Float, edge: Int = SWIPE_EDGE_LEFT) {
         try {
-            nativeOnBackEvent(phase, progress)
+            nativeOnBackEvent(phase, progress, edge)
         } catch (_: UnsatisfiedLinkError) {
         }
     }
@@ -500,8 +507,9 @@ class RlobKitMainActivity : NativeActivity() {
 
     external fun nativeOnBack(): Int
 
-    /** Predictive-back gesture phases, forwarded to the native side. */
-    external fun nativeOnBackEvent(phase: Int, progress: Float)
+    /** Predictive-back gesture phases, forwarded to the native side.
+     *  `edge` is Android's `SWIPE_EDGE_LEFT` / `SWIPE_EDGE_RIGHT`. */
+    external fun nativeOnBackEvent(phase: Int, progress: Float, edge: Int)
 
     external fun nativeStatusBarVisible(): Boolean
 
@@ -557,6 +565,11 @@ class RlobKitMainActivity : NativeActivity() {
         private const val EVENT_PROGRESS = 1
         private const val EVENT_CANCELLED = 2
         private const val EVENT_INVOKED = 3
+
+        // Mirrors rlobkit_app_events::back::SwipeEdge, and Android's own
+        // SWIPE_EDGE_* values (which the SDK does not expose to apps).
+        private const val SWIPE_EDGE_LEFT = 0
+        private const val SWIPE_EDGE_RIGHT = 1
 
         // Mirrors rlobkit_app_events::insets::RegionVisibility.
         private const val VISIBILITY_VISIBLE = 0

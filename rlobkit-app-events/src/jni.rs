@@ -27,7 +27,7 @@
 //! static methods on the same class. That is why the Kotlin side guards its
 //! native calls: it can be packaged into an app that does not link this crate.
 
-use crate::back::BackEvent;
+use crate::back::{BackEvent, SwipeEdge};
 use crate::insets::{Insets, WindowInsets};
 use crate::memory::MemoryPressure;
 use crate::system_bars;
@@ -44,6 +44,9 @@ const EVENT_STARTED: i32 = 0;
 const EVENT_PROGRESS: i32 = 1;
 const EVENT_CANCELLED: i32 = 2;
 const EVENT_INVOKED: i32 = 3;
+
+/// `android.window.BackEvent` swipe edges.
+const SWIPE_EDGE_RIGHT: i32 = 1;
 
 /// `BackOutcome` discriminants.
 const BACK_CONSUMED: i32 = 0;
@@ -78,10 +81,15 @@ fn memory_pressure(level: i32) -> MemoryPressure {
     }
 }
 
-fn back_event(phase: i32, progress: f32) -> Option<BackEvent> {
+fn back_event(phase: i32, progress: f32, edge: i32) -> Option<BackEvent> {
+    let edge = if edge == SWIPE_EDGE_RIGHT {
+        SwipeEdge::Right
+    } else {
+        SwipeEdge::Left
+    };
     match phase {
-        EVENT_STARTED => Some(BackEvent::Started),
-        EVENT_PROGRESS => Some(BackEvent::Progress(progress)),
+        EVENT_STARTED => Some(BackEvent::Started { edge }),
+        EVENT_PROGRESS => Some(BackEvent::Progress { progress, edge }),
         EVENT_CANCELLED => Some(BackEvent::Cancelled),
         EVENT_INVOKED => Some(BackEvent::Invoked),
         _ => None,
@@ -259,16 +267,17 @@ pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeOnBack(
 }
 
 /// Called from `OnBackAnimationCallback` on Android 14 and later. `phase` is one
-/// of the `EVENT_*` discriminants and `progress` is meaningful only for
-/// `EVENT_PROGRESS`.
+/// of the `EVENT_*` discriminants, `progress` is meaningful only for
+/// `EVENT_PROGRESS`, and `edge` is Android's `SWIPE_EDGE_*` value.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_rust_rlobkit_RlobKitMainActivity_nativeOnBackEvent(
     _env: EnvUnowned,
     _this: jobject,
     phase: jint,
     progress: jfloat,
+    edge: jint,
 ) {
-    if let Some(event) = back_event(phase, progress) {
+    if let Some(event) = back_event(phase, progress, edge) {
         crate::back::dispatch(event);
     }
 }

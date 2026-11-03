@@ -38,13 +38,23 @@ pub enum BackOutcome {
     CrossActivity,
 }
 
+/// The screen edge a predictive-back gesture started from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SwipeEdge {
+    /// The user dragged inwards from the left edge, so their finger moved right.
+    #[default]
+    Left,
+    /// The user dragged inwards from the right edge, so their finger moved left.
+    Right,
+}
+
 /// A phase of the predictive-back gesture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BackEvent {
     /// The gesture began. There is no cancellation yet.
-    Started,
+    Started { edge: SwipeEdge },
     /// The gesture moved, `0.0` at the start and `1.0` fully committed.
-    Progress(f32),
+    Progress { progress: f32, edge: SwipeEdge },
     /// The gesture was abandoned and the app is staying put.
     Cancelled,
     /// The gesture completed; the back was dispatched.
@@ -153,11 +163,11 @@ pub(crate) fn invoke() -> BackOutcome {
 #[cfg(all(feature = "jni-bridge", target_os = "android"))]
 pub(crate) fn dispatch(event: BackEvent) {
     match event {
-        BackEvent::Started => {
+        BackEvent::Started { .. } => {
             ACTIVE.store(true, Ordering::Relaxed);
             PROGRESS_BITS.store(0.0f32.to_bits(), Ordering::Relaxed);
         }
-        BackEvent::Progress(progress) => {
+        BackEvent::Progress { progress, .. } => {
             let progress = if progress.is_finite() {
                 progress.clamp(0.0, 1.0)
             } else {
